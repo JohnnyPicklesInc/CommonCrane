@@ -24,7 +24,7 @@ export {
 } from './match.ts'
 export { ContributionLog, type At, type LogOptions } from './log.ts'
 export { Watermark, type WatermarkOptions } from './watermark.ts'
-export { Members, type Member, type MemberId, type MembersOptions } from './members.ts'
+export { freeChairs, hostChair, roster, resizeChairs, type Seated } from './seating.ts'
 export { makeCode, isCode } from './code.ts'
 export { Presence, type PresenceOptions, type PresenceChange } from './presence.ts'
 export {
