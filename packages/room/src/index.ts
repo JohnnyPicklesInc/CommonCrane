@@ -23,6 +23,7 @@ export {
   type Lineup,
 } from './match.ts'
 export { ContributionLog, type At, type LogOptions } from './log.ts'
+export { Watermark, type WatermarkOptions } from './watermark.ts'
 export { Presence, type PresenceOptions, type PresenceChange } from './presence.ts'
 export {
   DecisionLog,
