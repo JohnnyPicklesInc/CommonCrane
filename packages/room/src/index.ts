@@ -15,7 +15,13 @@
 // had to run in one order. `Match` owns those joins: a room says what happened
 // and is handed the decisions to broadcast, with no order left to get wrong.
 
-export { Match, type MatchOptions, type BeginOptions, type Handover } from './match.ts'
+export {
+  Match,
+  type MatchOptions,
+  type BeginOptions,
+  type Handover,
+  type Lineup,
+} from './match.ts'
 export { ContributionLog, type At, type LogOptions } from './log.ts'
 export { Presence, type PresenceOptions, type PresenceChange } from './presence.ts'
 export {

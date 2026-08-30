@@ -18,6 +18,20 @@ import { ContributionLog, type At } from './log.ts'
 import { Presence } from './presence.ts'
 import { DecisionLog, type Clock } from './schedule.ts'
 
+/**
+ * Several places changing hands at once, on one point.
+ *
+ * The unit a room decides in, because a change is very often more than one
+ * place: switching sides is giving one up and taking another, and those are two
+ * halves of a single thing. Dated separately they get separate points — measured
+ * at eighty ticks apart here, and at a hundred and twenty in the game this was
+ * taken from, which leaves every client playing a different match in between.
+ */
+export interface Lineup {
+  readonly at: At
+  readonly changes: readonly Handover[]
+}
+
 /** A change of driver, dated to a point everybody can still reach. */
 export interface Handover {
   readonly p: number
@@ -179,6 +193,48 @@ export class Match {
     return this.drive(player, false, now)
   }
 
+  /**
+   * Change several places at once, on one point.
+   *
+   * The only place a change of driver is dated, so a change that is really two
+   * things — giving one place up and taking another — cannot come apart. Each
+   * place is asked where it would go on its own and the batch takes the latest
+   * of those answers: a point too far ahead costs a moment, a point already
+   * passed costs the match, because a client rewinds for it, runs off the end of
+   * its history, and abandons it in silence.
+   *
+   * Anchored per place because the right anchor differs. A place somebody is
+   * still speaking for is dated off their own last word, since their peers stall
+   * relative to that; a place already driven automatically is dated off the
+   * room, because nobody is waiting on it and its own last word may be minutes
+   * old — or, for a place that has never spoken, never.
+   */
+  reassign(changes: readonly { p: number; on: boolean }[], now: number): Lineup {
+    const view = {
+      head: this.contributions.head,
+      lastFrom: (q: number) => this.contributions.lastFrom(q),
+      isAutomatic: (q: number) => this.automatic[q] === true,
+    }
+    let at = this.contributions.head + 1
+    for (const c of changes) {
+      const want = this.opts.clock.schedule(view, c.p)
+      if (want > at) at = want
+    }
+    const out: Handover[] = []
+    for (const c of changes) {
+      this.automatic[c.p] = c.on
+      const h: Handover = { p: c.p, at, on: c.on }
+      this.decisions.add(at, h)
+      // Given a place back, the first point they can speak for is the one they
+      // were given it on, and their answer still has a round trip to make.
+      // Measured against anything earlier they are late before they have had a
+      // chance to say anything, and the room takes it straight back off them.
+      if (!c.on) this.presence.reset(c.p, now)
+      out.push(h)
+    }
+    return { at, changes: out }
+  }
+
   /** Everything a latecomer needs to replay the match to the present. */
   catchup(): { at: At; log: number[][]; handovers: Handover[] } {
     return {
@@ -205,22 +261,6 @@ export class Match {
    * itself off for the rest of the match with nothing to say so.
    */
   private drive(player: number, on: boolean, now: number): Handover {
-    const at = this.opts.clock.schedule(
-      {
-        head: this.contributions.head,
-        lastFrom: (q) => this.contributions.lastFrom(q),
-        isAutomatic: (q) => this.automatic[q] === true,
-      },
-      player,
-    )
-    this.automatic[player] = on
-    const h: Handover = { p: player, at, on }
-    this.decisions.add(at, h)
-    // Given a place back, the first point they can speak for is the one they
-    // were given it on, and their answer still has a round trip to make.
-    // Measured against anything earlier they are late before they have had a
-    // chance to say anything, and the room takes it straight back off them.
-    if (!on) this.presence.reset(player, now)
-    return h
+    return this.reassign([{ p: player, on }], now).changes[0]!
   }
 }

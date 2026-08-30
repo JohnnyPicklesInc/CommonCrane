@@ -139,3 +139,38 @@ describe('recycling a room', () => {
     expect(m.catchup().handovers).toEqual([])
   })
 })
+
+describe('a change that is really two changes', () => {
+  it('lands both halves on one point', () => {
+    // Switching sides is giving one place up and taking another. Dated
+    // separately they came apart — measured at eighty ticks here, and at a
+    // hundred and twenty in the game this was taken from — and in between,
+    // every client is playing a different match.
+    const m = match()
+    m.begin({ roster: 4, playing: [0, 1], now: 0 })
+    for (let t = 0; t < 200; t++) m.contribute(0, t, [1], 0)
+    for (let t = 0; t < 120; t++) m.contribute(1, t, [1], 0)
+
+    const swap = m.reassign([{ p: 1, on: true }, { p: 2, on: false }], 0)
+    expect(swap.changes.map((c) => c.at)).toEqual([swap.at, swap.at])
+  })
+
+  it('picks a point nobody has already gone past', () => {
+    const m = match()
+    m.begin({ roster: 4, playing: [0, 1], now: 0 })
+    for (let t = 0; t < 200; t++) m.contribute(0, t, [1], 0)
+    // Player 2 has never spoken, so its own last word is -1: taken alone that
+    // dates it into the deep past, which is the failure this guards.
+    const swap = m.reassign([{ p: 1, on: true }, { p: 2, on: false }], 0)
+    expect(swap.at).toBeGreaterThan(m.head)
+  })
+
+  it('records every half, so a replay makes the same change', () => {
+    const m = match()
+    m.begin({ roster: 4, playing: [0, 1], now: 0 })
+    m.contribute(0, 0, [1], 0)
+    const swap = m.reassign([{ p: 1, on: true }, { p: 2, on: false }], 0)
+    const recorded = m.catchup().handovers
+    for (const c of swap.changes) expect(recorded).toContainEqual(c)
+  })
+})
