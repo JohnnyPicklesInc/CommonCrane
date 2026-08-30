@@ -1,0 +1,226 @@
+// A match, as the room holds it.
+//
+// The pieces underneath — the log, the presence clock, the schedule — are each
+// simple and each independently tested. Every bug that has actually happened
+// with them was in the *joins* between them: three fields that had to be set
+// together and were not, and six statements that had to run in one order and
+// ran in another.
+//
+// So this owns the transitions rather than the parts. A room asks for a thing
+// that happened — a match began, somebody spoke, somebody went quiet, somebody
+// took a place — and is handed back the decisions to broadcast. There is no
+// order to get wrong because there is only ever one call.
+//
+// It still knows nothing about sockets, storage or timers. Those stay the
+// room's, and always did; what moves here is the sequencing.
+
+import { ContributionLog, type At } from './log.ts'
+import { Presence } from './presence.ts'
+import { DecisionLog, type Clock } from './schedule.ts'
+
+/** A change of driver, dated to a point everybody can still reach. */
+export interface Handover {
+  readonly p: number
+  readonly at: At
+  /** True when the place goes to whatever drives it automatically. */
+  readonly on: boolean
+}
+
+export interface MatchOptions {
+  /** The most players the room could ever hold. */
+  readonly players: number
+  readonly clock: Clock
+  /** How long somebody may say nothing before they are called quiet. */
+  readonly silenceMs: number
+}
+
+export interface BeginOptions {
+  /**
+   * Places a person could hold, empty ones included.
+   *
+   * The room's capacity, not the turnout. The spare places are driven
+   * automatically from the first point, which is what leaves somewhere for a
+   * latecomer to arrive into.
+   */
+  readonly roster: number
+  /** Which of those places actually have somebody in them. */
+  readonly playing: readonly number[]
+  readonly now: number
+}
+
+export class Match {
+  private readonly opts: MatchOptions
+  private readonly contributions: ContributionLog<number>
+  private readonly presence: Presence
+  private readonly decisions = new DecisionLog<Handover>()
+  private readonly automatic: boolean[]
+  private roster = 0
+  private running = false
+
+  constructor(opts: MatchOptions) {
+    this.opts = opts
+    this.contributions = new ContributionLog<number>({ players: opts.players })
+    this.presence = new Presence({ players: opts.players, silenceMs: opts.silenceMs })
+    this.automatic = new Array<boolean>(opts.players).fill(false)
+  }
+
+  get started(): boolean {
+    return this.running
+  }
+
+  /** The newest point anybody has spoken for. */
+  get head(): At {
+    return this.contributions.head
+  }
+
+  /** Whether this place is currently driven automatically. */
+  isAutomatic(player: number): boolean {
+    return this.automatic[player] === true
+  }
+
+  /**
+   * Begin a match. One call, because the order inside it is load-bearing.
+   *
+   * Written out by hand this was six statements in two blocks twenty lines
+   * apart, and the one that had to come last came first: the presence clock was
+   * started before anybody had been dealt a place, so every clock read zero, the
+   * first look called all of them quiet, and every place went to the computer on
+   * the opening tick. Both ends then applied those handovers at different points
+   * and played different matches. Nothing threw; two full test suites passed.
+   */
+  begin(o: BeginOptions): void {
+    this.running = true
+    this.roster = o.roster
+    this.contributions.clear()
+    this.presence.clear()
+    this.decisions.clear()
+    this.automatic.fill(false)
+    // The spare places are driven automatically from the first point. The room
+    // has to know it, and not only the simulation: otherwise the schedule dates
+    // the first latecomer's handover off a place that has never spoken, which
+    // is hundreds of points in the past.
+    const playing = new Set(o.playing)
+    for (let p = 0; p < o.roster && p < this.opts.players; p++) {
+      if (!playing.has(p)) this.automatic[p] = true
+    }
+    // And only now, once there is somebody to start a clock for.
+    for (const p of o.playing) this.presence.reset(p, o.now)
+  }
+
+  /** Give the match back. A room being recycled for a fresh one. */
+  end(): void {
+    this.running = false
+    this.roster = 0
+    this.contributions.clear()
+    this.presence.clear()
+    this.decisions.clear()
+    this.automatic.fill(false)
+  }
+
+  /**
+   * Somebody sent something.
+   *
+   * Records it, marks them heard, and hands back whatever that changes — which
+   * is a place coming back off the computer when its player speaks again, and
+   * otherwise nothing at all.
+   *
+   * Returns null if the claim was malformed, so a caller can tell that from an
+   * ordinary message that changed nothing.
+   */
+  contribute(player: number, from: At, run: readonly number[], now: number): Handover[] | null {
+    if (!this.contributions.record(player, from, run)) return null
+    this.presence.hear(player, now)
+    if (!this.automatic[player]) return []
+    // Speaking again takes the place straight back, rather than waiting for the
+    // next beat of the clock to notice.
+    return [this.drive(player, false, now)]
+  }
+
+  /**
+   * Look at the clock and hand back what changed.
+   *
+   * Call this both when traffic arrives and on a timer. Traffic alone is free
+   * and self-firing, because whoever is stalled is by definition still
+   * transmitting; its one blind spot is a room where everybody has gone quiet at
+   * once, and that is exactly when nothing else will fire either.
+   */
+  observe(now: number): Handover[] {
+    const change = this.presence.look(this.held(), now)
+    const out: Handover[] = []
+    for (const p of change.quiet) if (!this.automatic[p]) out.push(this.drive(p, true, now))
+    for (const p of change.back) if (this.automatic[p]) out.push(this.drive(p, false, now))
+    return out
+  }
+
+  /** Somebody's connection went. Their place changes hands at once. */
+  leave(player: number, now: number): Handover[] {
+    if (!this.running || player < 0 || this.automatic[player]) return []
+    // No waiting to find out: the connection is gone. `observe` would get there
+    // after the silence elapsed, and that is time everybody left spends stopped
+    // for somebody who has closed their tab.
+    return [this.drive(player, true, now)]
+  }
+
+  /** A place nobody holds, or -1. What a latecomer can be given. */
+  vacant(): number {
+    if (!this.running) return -1
+    const held = new Set(this.held())
+    for (let p = 0; p < this.roster; p++) if (!held.has(p)) return p
+    return -1
+  }
+
+  /**
+   * Give a place to somebody who has caught up.
+   *
+   * The handover it returns is the whole answer: the point it takes effect on
+   * is the point everybody else is told about, so the two cannot disagree.
+   */
+  seat(player: number, now: number): Handover {
+    return this.drive(player, false, now)
+  }
+
+  /** Everything a latecomer needs to replay the match to the present. */
+  catchup(): { at: At; log: number[][]; handovers: Handover[] } {
+    return {
+      at: this.contributions.head,
+      log: this.contributions.rectangle(0).slice(0, this.roster),
+      handovers: this.decisions.all().map((d) => d.body),
+    }
+  }
+
+  /** Who is answerable for a place right now. */
+  private held(): number[] {
+    const out: number[] = []
+    for (let p = 0; p < this.roster; p++) if (!this.automatic[p]) out.push(p)
+    return out
+  }
+
+  /**
+   * Change who drives a place: date it, record it, apply it.
+   *
+   * All three together, because doing two of them was the other bug. A place
+   * marked automatic in the simulation but not here is one the room goes on
+   * waiting for input from — and the confirmation watermark waits with it,
+   * taking every checkpoint fingerprint along, so divergence detection switches
+   * itself off for the rest of the match with nothing to say so.
+   */
+  private drive(player: number, on: boolean, now: number): Handover {
+    const at = this.opts.clock.schedule(
+      {
+        head: this.contributions.head,
+        lastFrom: (q) => this.contributions.lastFrom(q),
+        isAutomatic: (q) => this.automatic[q] === true,
+      },
+      player,
+    )
+    this.automatic[player] = on
+    const h: Handover = { p: player, at, on }
+    this.decisions.add(at, h)
+    // Given a place back, the first point they can speak for is the one they
+    // were given it on, and their answer still has a round trip to make.
+    // Measured against anything earlier they are late before they have had a
+    // chance to say anything, and the room takes it straight back off them.
+    if (!on) this.presence.reset(player, now)
+    return h
+  }
+}

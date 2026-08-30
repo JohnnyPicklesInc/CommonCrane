@@ -7,8 +7,15 @@
 // live server after passing several hundred unit tests.
 //
 // What is here is the arithmetic of a room: what everybody has sent, who has
-// gone quiet, and when a decision takes effect. The sockets come later.
+// gone quiet, and when a decision takes effect. The sockets stay the room's.
+//
+// `Match` is the one to reach for. The parts below it are each simple and each
+// separately tested, and every bug that has actually happened was in the joins
+// between them — three fields that had to move together, six statements that
+// had to run in one order. `Match` owns those joins: a room says what happened
+// and is handed the decisions to broadcast, with no order left to get wrong.
 
+export { Match, type MatchOptions, type BeginOptions, type Handover } from './match.ts'
 export { ContributionLog, type At, type LogOptions } from './log.ts'
 export { Presence, type PresenceOptions, type PresenceChange } from './presence.ts'
 export {
