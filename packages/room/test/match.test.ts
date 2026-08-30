@@ -174,3 +174,48 @@ describe('a change that is really two changes', () => {
     for (const c of swap.changes) expect(recorded).toContainEqual(c)
   })
 })
+
+describe('a room that has forgotten a match it is still running', () => {
+  // Any host can lose an object's memory while its connections outlive it — a
+  // restart, a redeploy, a failover, or a host that sheds idle objects and
+  // rebuilds them on the next message. What comes back knows the match is on
+  // and knows nothing about when.
+
+  it('does not judge anybody silent for time it was not there for', () => {
+    // A fresh clock has heard from nobody. Treated as though it had been
+    // listening all along, everybody reads as quiet the moment it wakes and
+    // every place is handed away at once — on the strength of a silence that
+    // never happened.
+    const woken = match()
+    woken.resume({ roster: 4, playing: [0, 1], now: SILENCE * 100 })
+    woken.contribute(0, 500, [1], SILENCE * 100)
+    expect(woken.observe(SILENCE * 100).map((h) => h.p)).toEqual([])
+    expect(woken.isAutomatic(1)).toBe(false)
+  })
+
+  it('dates nothing until the match says where it is', () => {
+    // With no history the schedule anchors on "never spoke", which is the very
+    // beginning — so a handover in a match thousands of points along is dated
+    // to the start, and every client rewinds for it, runs off the end of what
+    // it keeps, and abandons it without a word.
+    const woken = match()
+    woken.resume({ roster: 4, playing: [0, 1], now: 0 })
+    expect(woken.oriented).toBe(false)
+    expect(woken.observe(SILENCE * 100)).toEqual([])
+    expect(woken.leave(1, SILENCE * 100)).toEqual([])
+    expect(woken.vacant()).toBe(-1)
+  })
+
+  it('picks up again as soon as it hears where the match is', () => {
+    const woken = match()
+    woken.resume({ roster: 4, playing: [0, 1], now: 0 })
+    // Player nought speaks, which is both what orients the room and what keeps
+    // them from being called quiet themselves.
+    woken.contribute(0, 5000, [1], SILENCE)
+    expect(woken.oriented).toBe(true)
+    const gone = woken.observe(SILENCE + 1)
+    expect(gone.map((h) => h.p)).toEqual([1])
+    // And dated ahead of where the match actually is, not at its beginning.
+    expect(gone[0]!.at).toBeGreaterThan(5000)
+  })
+})

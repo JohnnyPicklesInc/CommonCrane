@@ -70,6 +70,7 @@ export class Match {
   private readonly automatic: boolean[]
   private roster = 0
   private running = false
+  private knowsWhere = false
 
   constructor(opts: MatchOptions) {
     this.opts = opts
@@ -80,6 +81,19 @@ export class Match {
 
   get started(): boolean {
     return this.running
+  }
+
+  /**
+   * Whether this object knows where the match has got to.
+   *
+   * False from the moment it is resumed until the first contribution arrives.
+   * A room can lose its memory while the people in it stay connected — a
+   * restart, a redeploy, a failover, a host that sheds idle objects and rebuilds
+   * them on the next message — and what comes back knows the match is running
+   * without knowing anything about when.
+   */
+  get oriented(): boolean {
+    return this.knowsWhere
   }
 
   /** The newest point anybody has spoken for. */
@@ -104,6 +118,9 @@ export class Match {
    */
   begin(o: BeginOptions): void {
     this.running = true
+    // A match that starts here starts at the origin, so where it has got to is
+    // never in doubt. A resumed one is a different matter entirely.
+    this.knowsWhere = true
     this.roster = o.roster
     this.contributions.clear()
     this.presence.clear()
@@ -121,9 +138,44 @@ export class Match {
     for (const p of o.playing) this.presence.reset(p, o.now)
   }
 
+  /**
+   * Pick up a match that was already running, in a room that has forgotten it.
+   *
+   * Not the same as beginning one, and the difference is the whole reason this
+   * exists. Beginning wipes the slate; resuming keeps the match and admits that
+   * *this object* is new. Two things follow, and both were live failures:
+   *
+   * Nobody may be judged silent for time this object was not there for. A fresh
+   * clock has heard from nobody, so a plain `begin` would find everybody four
+   * seconds quiet a moment later and hand every place away at once.
+   *
+   * And nothing may be dated until the match says where it is. With no history
+   * the schedule anchors on "never spoke", which is a point at the very start —
+   * so a handover in a match thousands of points along gets dated to the
+   * beginning, and every client rewinds for it, runs off the end of what it
+   * keeps, and abandons it in silence.
+   */
+  resume(o: { roster: number; playing: readonly number[]; now: number }): void {
+    this.running = true
+    this.knowsWhere = false
+    this.roster = o.roster
+    // Who was driving what is gone with everything else, so the connections are
+    // the only evidence: whoever is still here holds a place, and the rest of
+    // the roster is the computer's. That is the same rule a match opens on, and
+    // it is the best available — but it is a guess, which is the other reason
+    // nothing may be dated until the match has said where it is.
+    const playing = new Set(o.playing)
+    this.automatic.fill(false)
+    for (let p = 0; p < o.roster && p < this.opts.players; p++) {
+      if (!playing.has(p)) this.automatic[p] = true
+    }
+    for (const p of o.playing) this.presence.reset(p, o.now)
+  }
+
   /** Give the match back. A room being recycled for a fresh one. */
   end(): void {
     this.running = false
+    this.knowsWhere = false
     this.roster = 0
     this.contributions.clear()
     this.presence.clear()
@@ -143,6 +195,9 @@ export class Match {
    */
   contribute(player: number, from: At, run: readonly number[], now: number): Handover[] | null {
     if (!this.contributions.record(player, from, run)) return null
+    // The first thing anybody says is what tells a resumed room where the match
+    // has got to. Until then it must not date anything.
+    this.knowsWhere = true
     this.presence.hear(player, now)
     if (!this.automatic[player]) return []
     // Speaking again takes the place straight back, rather than waiting for the
@@ -159,6 +214,8 @@ export class Match {
    * once, and that is exactly when nothing else will fire either.
    */
   observe(now: number): Handover[] {
+    // Nothing can be dated until the match says where it is — see `oriented`.
+    if (!this.oriented) return []
     const change = this.presence.look(this.held(), now)
     const out: Handover[] = []
     for (const p of change.quiet) if (!this.automatic[p]) out.push(this.drive(p, true, now))
@@ -168,7 +225,7 @@ export class Match {
 
   /** Somebody's connection went. Their place changes hands at once. */
   leave(player: number, now: number): Handover[] {
-    if (!this.running || player < 0 || this.automatic[player]) return []
+    if (!this.running || !this.oriented || player < 0 || this.automatic[player]) return []
     // No waiting to find out: the connection is gone. `observe` would get there
     // after the silence elapsed, and that is time everybody left spends stopped
     // for somebody who has closed their tab.
@@ -177,7 +234,10 @@ export class Match {
 
   /** A place nobody holds, or -1. What a latecomer can be given. */
   vacant(): number {
-    if (!this.running) return -1
+    // A room that has forgotten the match has no place to give: seating
+    // somebody in a match it cannot describe to them is worse than turning them
+    // away, and it cannot describe one it has no history of.
+    if (!this.running || !this.oriented) return -1
     const held = new Set(this.held())
     for (let p = 0; p < this.roster; p++) if (!held.has(p)) return p
     return -1
