@@ -84,4 +84,17 @@ describe('compaction', () => {
     log.record(0, 4, [5])
     expect(log.rectangle(0)[0]).toEqual([3, 4, 5])
   })
+
+it('starts from the beginning again after a compacted match is cleared', () => {
+  // Not from wherever the last game was cut back to. The failure is silent:
+  // the next match reports a log starting at a point nobody has played, with
+  // no world to explain it, and every row is read off by that much.
+  const log = new ContributionLog<number>({ players: 2 })
+  for (let t = 0; t < 50; t++) log.record(0, t, [t])
+  log.compact(30)
+  expect(log.origin).toBe(30)
+  log.clear()
+  expect(log.origin).toBe(0)
+  expect(log.lastFrom(0)).toBe(-1)
+})
 })

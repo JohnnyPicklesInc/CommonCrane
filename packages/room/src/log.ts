@@ -27,6 +27,8 @@ export interface LogOptions {
 
 export class ContributionLog<C = number> {
   readonly origin: At
+  /** Where the log begins when it is empty. `origin` is where it begins now. */
+  private readonly first: At
   private readonly players: number
   private readonly rows: (C | undefined)[][] = []
   /** The newest point anybody has spoken for, or origin - 1 when nobody has. */
@@ -36,7 +38,8 @@ export class ContributionLog<C = number> {
 
   constructor(opts: LogOptions) {
     this.players = opts.players
-    this.origin = opts.origin ?? 0
+    this.first = opts.origin ?? 0
+    this.origin = this.first
     this.newest = this.origin - 1
     for (let p = 0; p < this.players; p++) {
       this.rows.push([])
@@ -117,8 +120,17 @@ export class ContributionLog<C = number> {
     }
   }
 
-  /** Forget everything. A room being recycled for a fresh game. */
+  /**
+   * Forget everything. A room being recycled for a fresh game.
+   *
+   * Back to where the log began, and not to wherever compaction last left it.
+   * This used to keep the compacted origin, which is silent and bad: the next
+   * match would report a log starting at a point it had never reached, with no
+   * world to explain why, and anybody replaying it would read every row off by
+   * however much the last game had thrown away.
+   */
   clear(): void {
+    ;(this as { origin: At }).origin = this.first
     for (let p = 0; p < this.players; p++) {
       this.rows[p] = []
       this.last[p] = this.origin - 1

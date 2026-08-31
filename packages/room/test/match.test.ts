@@ -235,6 +235,79 @@ describe('compacting a long match', () => {
     return m
   }
 
+  describe('deciding when to cut, rather than being told', () => {
+    // `compact` is the mechanism and `offer` is the policy. The three rules
+    // below are the ones every game with a growing log wrote for itself.
+
+    function keeping(keep: number | undefined, to: number): Match {
+      const m = new Match({
+        players: 8,
+        clock: rollbackClock({ window: WINDOW, slack: 4 }),
+        silenceMs: SILENCE,
+        keep,
+      })
+      m.begin({ roster: 4, playing: [0, 1], now: 0 })
+      for (let t = 0; t <= to; t++) {
+        m.contribute(0, t, [t + 1], 0)
+        m.contribute(1, t, [t + 100], 0)
+      }
+      return m
+    }
+
+    it('holds a world without cutting to it while the log is short', () => {
+      const m = keeping(100, 80)
+      expect(m.offer(40, { world: 40 })).toBe(true)
+      expect(m.from).toBe(0)
+      expect(m.origin).toBeNull()
+    })
+
+    it('cuts to the newest one it holds once the log is long enough', () => {
+      const m = keeping(100, 400)
+      m.offer(40, { world: 40 })
+      m.offer(200, { world: 200 })
+      expect(m.from).toBe(200)
+      expect(m.origin?.at).toBe(200)
+    })
+
+    it('never cuts at all when no limit is set', () => {
+      const m = keeping(undefined, 4000)
+      expect(m.offer(2000, { world: 2000 })).toBe(true)
+      expect(m.from).toBe(0)
+    })
+
+    it('keeps the newest offer, not the first', () => {
+      const m = keeping(100, 400)
+      expect(m.offer(200, { world: 200 })).toBe(true)
+      // Older than what it holds. Taking it would move the log's start
+      // backwards, to inputs that have already been thrown away.
+      expect(m.offer(150, { world: 150 })).toBe(false)
+      expect(m.origin?.at).toBe(200)
+    })
+
+    it('refuses a world from the future', () => {
+      // Past the head is past what anybody has said. Cutting there discards
+      // contributions that are the only record of what happened.
+      const m = keeping(100, 400)
+      expect(m.offer(900, { world: 900 })).toBe(false)
+      expect(m.from).toBe(0)
+    })
+
+    it('forgets the world when the room plays again', () => {
+      // A rematch is a different game in the same room. A world held over from
+      // the last one describes a rink nobody is standing on.
+      const m = keeping(100, 400)
+      m.offer(200, { world: 200 })
+      expect(m.origin?.at).toBe(200)
+      m.begin({ roster: 4, playing: [0, 1], now: 0 })
+      expect(m.origin).toBeNull()
+      for (let t = 0; t <= 400; t++) m.contribute(0, t, [t], 0)
+      // And the offer it was holding is gone with it, rather than cutting the
+      // new match back to the old one's rink the moment it gets long enough.
+      expect(m.offer(200, { world: 'new' })).toBe(true)
+      expect(m.origin?.state).toEqual({ world: 'new' })
+    })
+  })
+
   it('says where the log begins without building it', () => {
     const m = played(80)
     expect(m.from).toBe(0)

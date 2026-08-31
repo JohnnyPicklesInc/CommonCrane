@@ -61,6 +61,20 @@ export interface MatchOptions {
   readonly clock: Clock
   /** How long somebody may say nothing before they are called quiet. */
   readonly silenceMs: number
+  /**
+   * How long the log may get before the match cuts it back to a world
+   * somebody has published.
+   *
+   * Left out, it never cuts, which is the right answer for most games: a match
+   * of twenty turns, or one that lasts five minutes, will never reach any
+   * limit worth having and the machinery is pure cost. It earns its place on
+   * the long ones — six players at sixty a second is three hundred and sixty
+   * numbers a second, and nothing else in a room grows like that.
+   *
+   * Measured in points, so what it means is whatever the clock means: ticks in
+   * a rollback game, turns in a turn-based one.
+   */
+  readonly keep?: number
 }
 
 export interface BeginOptions {
@@ -92,6 +106,15 @@ export class Match {
   private readonly automatic: boolean[]
   private roster = 0
   private start: Origin | null = null
+  /**
+   * The newest world anybody has published, waiting for the log to be long
+   * enough to be worth cutting to it.
+   *
+   * Held apart from `start` because the two are different questions. This is
+   * the best place the match *could* start from; `start` is where it does. A
+   * match that has never been long enough has a pending world and no origin.
+   */
+  private pending: Origin | null = null
   private running = false
   private knowsWhere = false
 
@@ -153,6 +176,7 @@ export class Match {
   begin(o: BeginOptions): void {
     this.running = true
     this.start = null
+    this.pending = null
     // A match that starts here starts at the origin, so where it has got to is
     // never in doubt. A resumed one is a different matter entirely.
     this.knowsWhere = true
@@ -212,6 +236,7 @@ export class Match {
   end(): void {
     this.running = false
     this.start = null
+    this.pending = null
     this.knowsWhere = false
     this.roster = 0
     this.contributions.clear()
@@ -358,6 +383,37 @@ export class Match {
     if (at <= this.contributions.origin || at > this.contributions.head) return false
     this.start = { at, state }
     this.contributions.compact(at)
+    return true
+  }
+
+  /**
+   * Somebody publishes a world the match could start from, and the match cuts
+   * back to it once there is enough behind it to be worth cutting.
+   *
+   * The policy, where `compact` is the mechanism. Three rules, and every game
+   * that grew a log wrote all three: keep the newest offer rather than the
+   * first, never cut to a point the log has already passed, and do not bother
+   * until the log is longer than `keep`.
+   *
+   * Who is allowed to publish one is not decided here, because a match does
+   * not know about connections. It is the same rule as the settings — one
+   * authority, so that a player who has fallen behind cannot rewrite where
+   * everybody else begins — and the room applies it before calling this.
+   *
+   * Returns whether the offer was taken, not whether it caused a cut.
+   */
+  offer(at: At, state: unknown): boolean {
+    if (!this.running || !Number.isInteger(at)) return false
+    // Not past the head: a world from the future would throw away
+    // contributions that are the only record of what happened.
+    if (at > this.contributions.head) return false
+    // Newer than both what is held and what is already in use.
+    if (at <= (this.pending?.at ?? -1) || at <= this.contributions.origin) return false
+    this.pending = { at, state }
+    const keep = this.opts.keep
+    if (keep !== undefined && this.contributions.head - this.contributions.origin > keep) {
+      this.compact(this.pending.at, this.pending.state)
+    }
     return true
   }
 
