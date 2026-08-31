@@ -219,3 +219,70 @@ describe('a room that has forgotten a match it is still running', () => {
     expect(gone[0]!.at).toBeGreaterThan(5000)
   })
 })
+
+describe('compacting a long match', () => {
+  // The only thing that keeps a match from growing without bound. Everything
+  // before the point a world is remembered at is re-derivable from that world,
+  // and costs nothing but memory to keep hold of.
+
+  function played(to: number): Match {
+    const m = match()
+    m.begin({ roster: 4, playing: [0, 1], now: 0 })
+    for (let t = 0; t <= to; t++) {
+      m.contribute(0, t, [t + 1], 0)
+      m.contribute(1, t, [t + 100], 0)
+    }
+    return m
+  }
+
+  it('says where the log begins without building it', () => {
+    const m = played(80)
+    expect(m.from).toBe(0)
+    m.compact(40, { world: true })
+    expect(m.from).toBe(40)
+    expect(m.from).toBe(m.catchup().from)
+  })
+
+  it('keeps only what is still to be replayed', () => {
+    const m = played(200)
+    expect(m.compact(150, 'the world at 150')).toBe(true)
+    const c = m.catchup()
+    expect(c.from).toBe(150)
+    expect(c.at).toBe(200)
+    expect(c.origin).toEqual({ at: 150, state: 'the world at 150' })
+    // Fifty-one points of log rather than two hundred and one.
+    expect(c.log[0]).toHaveLength(51)
+    expect(c.log[0]![0]).toBe(151)
+  })
+
+  it('says where a replay starts, so nobody begins at the beginning', () => {
+    // A latecomer handed rows starting at 150 and told nothing would replay
+    // them from zero, which is a different match entirely.
+    const m = played(200)
+    expect(m.catchup().origin).toBeNull()
+    m.compact(150, 'x')
+    expect(m.catchup().origin?.at).toBe(150)
+  })
+
+  it('refuses to compact past the newest thing anybody has said', () => {
+    // The log after that point is the only record there is of it.
+    const m = played(200)
+    expect(m.compact(201, 'x')).toBe(false)
+    expect(m.catchup().from).toBe(0)
+  })
+
+  it('refuses to compact backwards', () => {
+    const m = played(200)
+    m.compact(150, 'x')
+    expect(m.compact(100, 'y')).toBe(false)
+    expect(m.catchup().origin?.state).toBe('x')
+  })
+
+  it('forgets where it started when the room plays again', () => {
+    const m = played(200)
+    m.compact(150, 'x')
+    m.end()
+    m.begin({ roster: 4, playing: [0, 1], now: 0 })
+    expect(m.catchup().origin).toBeNull()
+  })
+})

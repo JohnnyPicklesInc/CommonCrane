@@ -21,6 +21,7 @@ export {
   type BeginOptions,
   type Handover,
   type Lineup,
+  type Origin,
 } from './match.ts'
 export { ContributionLog, type At, type LogOptions } from './log.ts'
 export { Watermark, type WatermarkOptions } from './watermark.ts'

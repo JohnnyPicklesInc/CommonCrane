@@ -32,6 +32,21 @@ export interface Lineup {
   readonly changes: readonly Handover[]
 }
 
+/**
+ * Where a replay starts.
+ *
+ * A seed is only the cheapest way of writing one down. Once a state at a later
+ * point exists, everything before it is re-derivable from it and costs nothing
+ * but memory to keep — which is what lets a match run longer than the log a
+ * room is willing to hold.
+ *
+ * `state` is the game's and is never opened here.
+ */
+export interface Origin {
+  readonly at: At
+  readonly state: unknown
+}
+
 /** A change of driver, dated to a point everybody can still reach. */
 export interface Handover {
   readonly p: number
@@ -76,6 +91,7 @@ export class Match {
    */
   private readonly automatic: boolean[]
   private roster = 0
+  private start: Origin | null = null
   private running = false
   private knowsWhere = false
 
@@ -108,6 +124,17 @@ export class Match {
     return this.contributions.head
   }
 
+  /**
+   * The oldest point the log still holds. Zero until it has been compacted.
+   *
+   * Worth having on its own so that deciding whether to compact does not mean
+   * building the whole log to read one number off it — which is a decision
+   * taken every few seconds, on the longest logs in the room.
+   */
+  get from(): At {
+    return this.contributions.origin
+  }
+
   /** Whether this place is currently driven automatically. */
   isAutomatic(player: number): boolean {
     return this.automatic[player] === true
@@ -125,6 +152,7 @@ export class Match {
    */
   begin(o: BeginOptions): void {
     this.running = true
+    this.start = null
     // A match that starts here starts at the origin, so where it has got to is
     // never in doubt. A resumed one is a different matter entirely.
     this.knowsWhere = true
@@ -183,6 +211,7 @@ export class Match {
   /** Give the match back. A room being recycled for a fresh one. */
   end(): void {
     this.running = false
+    this.start = null
     this.knowsWhere = false
     this.roster = 0
     this.contributions.clear()
@@ -312,9 +341,39 @@ export class Match {
     return { at, changes: out }
   }
 
+  /**
+   * Throw away everything before `at`, and remember the world as it was there.
+   *
+   * The only thing that keeps a long match from growing without bound. A room
+   * that never simulates cannot produce the state itself, so it is given one —
+   * by whoever the game has decided to believe, which is a question with one
+   * sensible answer and no clever ones.
+   *
+   * Refused before the point the log already starts at, and refused past the
+   * newest thing anybody has said: compacting into the future would throw away
+   * contributions that are still the only record of what happened.
+   */
+  compact(at: At, state: unknown): boolean {
+    if (!this.running) return false
+    if (at <= this.contributions.origin || at > this.contributions.head) return false
+    this.start = { at, state }
+    this.contributions.compact(at)
+    return true
+  }
+
+  /** Where a replay of this match has to start. Null while it starts at the beginning. */
+  get origin(): Origin | null {
+    return this.start
+  }
+
   /** Everything a latecomer needs to replay the match to the present. */
-  catchup(): { at: At; log: number[][]; handovers: Handover[] } {
+  catchup(): { origin: Origin | null; from: At; at: At; log: number[][]; handovers: Handover[] } {
     return {
+      // Where the rows below begin. Zero until the log has been compacted, and
+      // the state to begin from once it has — a replay that started at the
+      // beginning regardless would be replaying inputs it does not have.
+      origin: this.start,
+      from: this.contributions.origin,
       at: this.contributions.head,
       log: this.contributions.rectangle(0).slice(0, this.roster),
       handovers: this.decisions.all().map((d) => d.body),
