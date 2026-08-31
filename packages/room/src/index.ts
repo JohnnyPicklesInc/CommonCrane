@@ -27,6 +27,7 @@ export { Watermark, type WatermarkOptions } from './watermark.ts'
 export { freeChairs, hostChair, roster, resizeChairs, type Seated } from './seating.ts'
 export { makeCode, isCode } from './code.ts'
 export { admit, type Doorway, type Arrival, type Admission } from './door.ts'
+export { sift, type Listed, type Offer, type SiftOptions } from './listing.ts'
 export { Presence, type PresenceOptions, type PresenceChange } from './presence.ts'
 export {
   DecisionLog,
