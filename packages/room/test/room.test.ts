@@ -1,0 +1,249 @@
+// The joins, which is the only reason `Room` exists.
+//
+// Each part underneath is tested on its own elsewhere. What is checked here is
+// the order they run in and what falls out of it — which is where every bug
+// that actually happened in these games lived.
+
+import { describe, it, expect } from 'vitest'
+import { Room, type Member, type Decision } from '../src/room.ts'
+import { rollbackClock } from '../src/schedule.ts'
+
+type Settings = { mode: number }
+type Seat = number
+
+const WINDOW = 14
+const SILENCE = 4000
+const CAPACITY = 6
+const ROSTER = 6
+
+/** A room whose membership is a plain array the test moves about. */
+function room() {
+  const members: Member<string, Seat>[] = []
+  const r = new Room<string, Settings, Seat>({
+    capacity: CAPACITY,
+    roster: ROSTER,
+    clock: rollbackClock({ window: WINDOW, slack: 4 }),
+    silenceMs: SILENCE,
+    recall: 64,
+    heartbeatMs: 45_000,
+    settings: { mode: 0 },
+    checkSettings: (raw) => {
+      const m = (raw as Partial<Settings>)?.mode
+      return m === 0 || m === 1 ? { mode: m } : null
+    },
+    checkSeat: (raw) => (raw === 0 || raw === 1 ? (raw as Seat) : null),
+    members: () => members,
+    defaultSeat: (chair) => (chair % 2) as Seat,
+  })
+  /** Do what a host would do with the decisions it was handed. */
+  const apply = (name: string, out: Decision<string, Settings, Seat>[]) => {
+    for (const d of out) {
+      if (d.kind === 'seated') {
+        const m = members.find((x) => x.who === d.who)
+        if (m === undefined) {
+          members.push({ who: d.who, chairs: [...d.chairs], name, seats: [], players: [] })
+        } else {
+          const i = members.indexOf(m)
+          members[i] = { ...m, chairs: [...d.chairs] }
+        }
+      }
+    }
+    return out
+  }
+  const join = (who: string, opts: Partial<{ build: string; announce: boolean }> = {}) => {
+    const at = r.arrive(
+      who,
+      { name: who, build: opts.build ?? 'v1', announce: opts.announce ?? false, code: 'ABCD' },
+      0,
+    )
+    apply(who, at)
+    const after = at.some((d) => d.kind === 'refuse') ? [] : r.arrived(who, who, 0)
+    return [...at, ...after]
+  }
+  const sit = (who: string, seats: Seat[]) => {
+    const i = members.findIndex((m) => m.who === who)
+    members[i] = { ...members[i]!, seats }
+  }
+  const deal = (out: Decision<string, Settings, Seat>[]) => {
+    for (const d of out) {
+      if (d.kind !== 'begun') continue
+      for (const x of d.seating.dealt) {
+        const i = members.findIndex((m) => m.who === (x.who as string))
+        if (i >= 0) members[i] = { ...members[i]!, players: [...x.players] }
+      }
+    }
+    return out
+  }
+  const drop = (who: string) => {
+    const i = members.findIndex((m) => m.who === who)
+    if (i >= 0) members.splice(i, 1)
+  }
+  return { r, members, join, sit, deal, drop }
+}
+
+const kinds = (out: Decision<string, Settings, Seat>[]) => out.map((d) => d.kind)
+const find = <K extends Decision<string, Settings, Seat>['kind']>(
+  out: Decision<string, Settings, Seat>[],
+  kind: K,
+) => out.find((d) => d.kind === kind) as Extract<Decision<string, Settings, Seat>, { kind: K }> | undefined
+
+describe('who gets in, and on whose terms', () => {
+  it('seats the first arrival and lets them set the terms', () => {
+    const { r, join } = room()
+    const out = join('Alice', { announce: true, build: 'v1' })
+    expect(find(out, 'seated')?.chairs).toEqual([0])
+    expect(r.build).toBe('v1')
+    expect(r.code).toBe('ABCD')
+  })
+
+  it('does not let a later arrival set them, even in chair zero', () => {
+    // The security rule, and the shape it broke in. The lowest chair is handed
+    // out again the moment its occupant leaves, so a joiner taking it could put
+    // a private room on the public board over its owner's head.
+    const { join, drop } = room()
+    join('Alice', { announce: false })
+    join('Bob')
+    drop('Alice')
+    const out = join('Carol', { announce: true })
+    expect(find(out, 'seated')?.chairs).toEqual([0])
+    expect(find(out, 'listed')?.entry).toBeNull()
+  })
+
+  it('turns away a different build', () => {
+    const { join } = room()
+    join('Alice', { build: 'v1' })
+    const out = join('Bob', { build: 'v2' })
+    expect(kinds(out)).toEqual(['refuse'])
+  })
+})
+
+describe('the drop', () => {
+  it('numbers places from zero however the chairs fell', () => {
+    // A lobby that lost its middle chair still starts a match numbered from
+    // zero with no holes, which is the only numbering a simulation understands.
+    const { r, join, sit, deal, drop } = room()
+    join('Alice')
+    join('Bob')
+    join('Carol')
+    sit('Alice', [0]); sit('Bob', [1]); sit('Carol', [0])
+    drop('Bob')
+    const out = deal(r.begin('Alice', 3, 0))
+    const begun = find(out, 'begun')!
+    expect(begun.seating.chairs).toEqual([0, 2])
+    expect(begun.seating.names).toEqual(['Alice', 'Carol'])
+    expect(begun.seating.seats).toEqual([0, 0])
+  })
+
+  it('leaves out anybody who has not said where they want to sit', () => {
+    const { r, join, sit, deal } = room()
+    join('Alice'); join('Bob')
+    sit('Alice', [0])
+    const out = deal(r.begin('Alice', 2, 0))
+    expect(find(out, 'begun')!.seating.names).toEqual(['Alice'])
+    // And they are a watcher, which the game already knows how to be.
+    expect(find(out, 'begun')!.seating.dealt.find((d) => d.who === 'Bob')?.players).toEqual([])
+  })
+
+  it('belongs to the host alone', () => {
+    const { r, join, sit } = room()
+    join('Alice'); join('Bob')
+    sit('Alice', [0]); sit('Bob', [1])
+    expect(r.begin('Bob', 2, 0)).toEqual([])
+    expect(r.started).toBe(false)
+  })
+
+  it('counts everybody as present, so nobody is retired on the first point', () => {
+    const { r, join, sit, deal } = room()
+    join('Alice'); join('Bob')
+    sit('Alice', [0]); sit('Bob', [1])
+    deal(r.begin('Alice', 2, 0))
+    // A moment later, well inside the silence.
+    expect(r.tick(100).filter((d) => d.kind === 'handovers')).toEqual([])
+  })
+})
+
+describe('the clock', () => {
+  it('retires somebody who has gone quiet, without an input to prompt it', () => {
+    // The whole point of having one. Everything else is measured against
+    // whoever is furthest along, which fails when that player stops too.
+    const { r, join, sit, deal } = room()
+    join('Alice'); join('Bob')
+    sit('Alice', [0]); sit('Bob', [1])
+    deal(r.begin('Alice', 2, 0))
+    const out = r.tick(SILENCE + 1000)
+    const changes = find(out, 'handovers')?.changes ?? []
+    expect(changes.map((c) => c.p).sort()).toEqual([0, 1])
+    expect(changes.every((c) => c.on)).toBe(true)
+  })
+
+  it('says when it wants looking at again', () => {
+    const { r, join } = room()
+    join('Alice')
+    expect(find(r.tick(0), 'wake')?.inMs).toBe(45_000)
+  })
+})
+
+describe('leaving', () => {
+  it('hands a departing player their places straight away', () => {
+    const { r, join, sit, deal, drop } = room()
+    join('Alice'); join('Bob')
+    sit('Alice', [0]); sit('Bob', [1])
+    deal(r.begin('Alice', 2, 0))
+    r.input('Alice', 0, 0, [1], 0)
+    r.input('Bob', 1, 0, [1], 0)
+    drop('Bob')
+    // Removed first, which is what some hosts do — the handovers still happen.
+    const out = r.depart('Bob', { name: 'Bob', players: [1] }, 100)
+    expect(find(out, 'handovers')?.changes.map((c) => c.p)).toEqual([1])
+  })
+
+  it('takes the listing down before throwing the room away', () => {
+    // Order, not presence. Wiping the storage loses the code the entry is filed
+    // under, so delisting afterwards strands it until it goes stale.
+    const { r, join, drop } = room()
+    join('Alice', { announce: true })
+    drop('Alice')
+    const out = r.depart('Alice', { name: 'Alice', players: [] }, 0)
+    expect(kinds(out)).toEqual(['left', 'listed', 'recycle'])
+    expect(find(out, 'listed')?.entry).toBeNull()
+  })
+
+  it('stops advertising a chair the leaver still nominally holds', () => {
+    const { join, r } = room()
+    join('Alice', { announce: true })
+    join('Bob')
+    // Not yet removed from the roster, which is what a closing socket looks like.
+    const out = r.depart('Bob', { name: 'Bob', players: [] }, 0)
+    expect(find(out, 'listed')?.entry?.players).toBe(1)
+  })
+})
+
+describe('a room that lost its memory', () => {
+  it('picks the match back up from the connections, not from nothing', () => {
+    // Left to itself it calls everybody quiet a moment later and dates their
+    // handovers to the opening of a match that is thousands of points along.
+    const { r, join, sit, deal, members } = room()
+    join('Alice'); join('Bob')
+    sit('Alice', [0]); sit('Bob', [1])
+    deal(r.begin('Alice', 2, 0))
+    r.input('Alice', 0, 0, [1, 2, 3], 0)
+
+    // A fresh object with the same people still connected.
+    const woken = room()
+    woken.members.push(...members)
+    woken.r.restore({ build: 'v1', code: 'ABCD', announced: false, since: 0 }, true)
+    expect(woken.r.tick(100).filter((d) => d.kind === 'handovers')).toEqual([])
+    // And it will not seat a latecomer in a match it cannot describe.
+    const out = woken.r.arrive('Zoe', { name: 'Zoe', build: 'v1', announce: false, code: 'ABCD' }, 100)
+    expect(kinds(out)).toEqual(['refuse'])
+  })
+})
+
+describe('disagreement', () => {
+  it('says so once, and only once', () => {
+    const { r } = room()
+    expect(r.fingerprint(60, 111)).toEqual([])
+    expect(kinds(r.fingerprint(60, 222))).toEqual(['disagreed'])
+    expect(r.fingerprint(60, 333)).toEqual([])
+  })
+})

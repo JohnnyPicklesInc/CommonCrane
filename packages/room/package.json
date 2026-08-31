@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./client": "./src/client.ts",
-    "./rollback": "./src/rollback.ts"
+    "./rollback": "./src/rollback.ts",
+    "./durable": "./src/durable.ts"
   }
 }

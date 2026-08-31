@@ -29,6 +29,13 @@ export { Fingerprints, type FingerprintsOptions } from './fingerprints.ts'
 export { freeChairs, hostChair, roster, resizeChairs, type Seated } from './seating.ts'
 export { makeCode } from './code.ts'
 export { admit, type Doorway, type Arrival, type Admission } from './door.ts'
+export {
+  Room,
+  type RoomOptions,
+  type Member,
+  type Seating,
+  type Decision,
+} from './room.ts'
 export { sift, type Listed, type Offer, type SiftOptions } from './listing.ts'
 export {
   Lobby,
