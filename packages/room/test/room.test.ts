@@ -146,6 +146,26 @@ describe('taking more chairs', () => {
   })
 })
 
+describe('proposing what everybody plays', () => {
+  it('offers the room to the list again, in case the card was built from it', () => {
+    // A card can be built out of the settings — which arena, which two sides —
+    // and the room cannot know whether this game's is. Saying nothing leaves
+    // the board advertising a room that has changed underneath it.
+    const { r, join } = room()
+    join('Alice', { announce: true })
+    join('Bob')
+    const out = r.propose('Alice', { mode: 1 })
+    expect(kinds(out)).toContain('listed')
+    expect(find(out, 'listed')?.entry).not.toBeNull()
+  })
+
+  it('says nothing at all when it is refused', () => {
+    const { r, join } = room()
+    join('Alice', { announce: true })
+    expect(r.propose('Alice', { mode: 9 })).toEqual([])
+  })
+})
+
 describe('the drop', () => {
   it('numbers places from zero however the chairs fell', () => {
     // A lobby that lost its middle chair still starts a match numbered from

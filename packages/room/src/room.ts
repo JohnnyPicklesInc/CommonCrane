@@ -477,6 +477,12 @@ export class Room<Who, Settings, Seat> {
     return [
       { kind: 'remember', state: this.lobby.snapshot(), started: this.running },
       { kind: 'lobby', view: this.view() },
+      // The card a room shows on the public list can be built out of its
+      // settings — which arena you would be walking into, which two sides are
+      // playing — and this cannot know whether this game's is. Re-listing is
+      // cheap and saying nothing leaves the board advertising a room that has
+      // changed underneath it.
+      this.listing(),
     ]
   }
 
