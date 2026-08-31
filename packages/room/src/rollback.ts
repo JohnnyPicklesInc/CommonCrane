@@ -493,14 +493,33 @@ export class Rollback<State> {
     return lead
   }
 
-  /** True when we are too far ahead of a peer and must wait for them. */
+  /**
+   * True when we are too far ahead of a peer and must wait for them.
+   *
+   * Two ways to stop waiting, and the second one is not an optimisation.
+   *
+   * A place the computer is already driving is not one to wait for — without
+   * that the handover changes nothing, because every peer goes on stopping for
+   * input that is never coming.
+   *
+   * And a place the room has *decided* goes to the computer is not one either,
+   * from the moment the decision arrives rather than from the point it names.
+   * Waiting until the point is reached only works while that point is inside
+   * the prediction window, and whether it is depends on a constant each game
+   * picks for itself. One of these two games picked a grace of twelve against a
+   * window of fourteen and never noticed; the other picked eighteen, and read
+   * the decision on arrival, which is the only reason it worked. Read on
+   * arrival, the two are the same and neither game has to keep a tuning
+   * constant inside a window to avoid a deadlock nobody would diagnose.
+   *
+   * A place handed *back* is waited for again, which is right: somebody has
+   * returned, and the nudge in `stepOnce` is what stops them being counted late
+   * for the time they were away.
+   */
   private shouldStall(): boolean {
     for (let p = 0; p < this.opts.players; p++) {
       if (this.opts.localPlayers.includes(p)) continue
-      // A place the computer is driving is not one to wait for. Without this
-      // the handover changes nothing: the room hands it over and every peer
-      // goes on stopping for input that is never coming and is no longer
-      // wanted.
+      if (this.autoFrom.get(p)?.on === true) continue
       if (!this.sim.holds(this.state, p)) continue
       if (this.at - this.lastReal[p]! > this.opts.window) return true
     }
