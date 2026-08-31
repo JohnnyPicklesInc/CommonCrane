@@ -33,7 +33,7 @@ describe('beginning a match', () => {
     const START = SILENCE * 10
     const m = match()
     m.begin({ roster: 4, playing: [0, 1], now: START })
-    expect(m.observe(START)).toEqual([])
+    expect(m.observe([0, 1], START)).toEqual([])
     expect(m.isAutomatic(0)).toBe(false)
     expect(m.isAutomatic(1)).toBe(false)
   })
@@ -44,7 +44,7 @@ describe('beginning a match', () => {
     expect(m.isAutomatic(2)).toBe(true)
     expect(m.isAutomatic(3)).toBe(true)
     // And they are what a latecomer is given.
-    expect(m.vacant()).toBe(2)
+    expect(m.vacant([0, 1])).toBe(2)
   })
 
   it('never dates a latecomer’s place into the past', () => {
@@ -65,19 +65,19 @@ describe('a player who goes quiet', () => {
   it('is called quiet once, and only after the silence is up', () => {
     const m = match()
     m.begin({ roster: 4, playing: [0, 1], now: 0 })
-    expect(m.observe(SILENCE - 1)).toEqual([])
-    const first = m.observe(SILENCE + 1)
+    expect(m.observe([0, 1], SILENCE - 1)).toEqual([])
+    const first = m.observe([0, 1], SILENCE + 1)
     expect(first.map((h) => h.p)).toEqual([0, 1])
     expect(first.every((h) => h.on)).toBe(true)
     // Still silent, but no longer news: a room that re-decided every look would
     // append a handover a second for the rest of the match.
-    expect(m.observe(SILENCE + 2)).toEqual([])
+    expect(m.observe([0, 1], SILENCE + 2)).toEqual([])
   })
 
   it('gets their place back the moment they speak', () => {
     const m = match()
     m.begin({ roster: 4, playing: [0, 1], now: 0 })
-    m.observe(SILENCE + 1)
+    m.observe([0, 1], SILENCE + 1)
     expect(m.isAutomatic(1)).toBe(true)
     const back = m.contribute(1, 0, [7], SILENCE + 2)
     expect(back?.map((h) => h.on)).toEqual([false])
@@ -91,7 +91,7 @@ describe('a player who goes quiet', () => {
     for (let t = 0; t < 40; t++) {
       now += 1000
       m.contribute(1, t, [1], now)
-      expect(m.observe(now).some((h) => h.p === 1 && h.on)).toBe(false)
+      expect(m.observe([0, 1], now).some((h) => h.p === 1 && h.on)).toBe(false)
     }
   })
 })
@@ -104,7 +104,7 @@ describe('a connection that goes', () => {
     expect(gone.map((h) => h.on)).toEqual([true])
     expect(m.isAutomatic(1)).toBe(true)
     // And is not announced twice when the clock comes round.
-    expect(m.observe(SILENCE + 1).some((h) => h.p === 1)).toBe(false)
+    expect(m.observe([0, 1], SILENCE + 1).some((h) => h.p === 1)).toBe(false)
   })
 })
 
@@ -134,7 +134,7 @@ describe('recycling a room', () => {
     m.end()
     expect(m.started).toBe(false)
     expect(m.head).toBe(-1)
-    expect(m.vacant()).toBe(-1)
+    expect(m.vacant([])).toBe(-1)
     expect(m.isAutomatic(2)).toBe(false)
     expect(m.catchup().handovers).toEqual([])
   })
@@ -189,7 +189,7 @@ describe('a room that has forgotten a match it is still running', () => {
     const woken = match()
     woken.resume({ roster: 4, playing: [0, 1], now: SILENCE * 100 })
     woken.contribute(0, 500, [1], SILENCE * 100)
-    expect(woken.observe(SILENCE * 100).map((h) => h.p)).toEqual([])
+    expect(woken.observe([0, 1], SILENCE * 100).map((h) => h.p)).toEqual([])
     expect(woken.isAutomatic(1)).toBe(false)
   })
 
@@ -201,9 +201,9 @@ describe('a room that has forgotten a match it is still running', () => {
     const woken = match()
     woken.resume({ roster: 4, playing: [0, 1], now: 0 })
     expect(woken.oriented).toBe(false)
-    expect(woken.observe(SILENCE * 100)).toEqual([])
+    expect(woken.observe([0, 1], SILENCE * 100)).toEqual([])
     expect(woken.leave(1, SILENCE * 100)).toEqual([])
-    expect(woken.vacant()).toBe(-1)
+    expect(woken.vacant([0, 1])).toBe(-1)
   })
 
   it('picks up again as soon as it hears where the match is', () => {
@@ -213,7 +213,7 @@ describe('a room that has forgotten a match it is still running', () => {
     // them from being called quiet themselves.
     woken.contribute(0, 5000, [1], SILENCE)
     expect(woken.oriented).toBe(true)
-    const gone = woken.observe(SILENCE + 1)
+    const gone = woken.observe([0, 1], SILENCE + 1)
     expect(gone.map((h) => h.p)).toEqual([1])
     // And dated ahead of where the match actually is, not at its beginning.
     expect(gone[0]!.at).toBeGreaterThan(5000)

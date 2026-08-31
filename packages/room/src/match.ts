@@ -67,6 +67,13 @@ export class Match {
   private readonly contributions: ContributionLog<number>
   private readonly presence: Presence
   private readonly decisions = new DecisionLog<Handover>()
+  /**
+   * Whether the computer is driving this place right now.
+   *
+   * Not the same question as whether anybody holds it, and conflating the two
+   * gave a newcomer somebody else's place: a player who has gone quiet is
+   * driven by the computer *and* still theirs — they are lagging, not gone.
+   */
   private readonly automatic: boolean[]
   private roster = 0
   private running = false
@@ -131,6 +138,7 @@ export class Match {
     // the first latecomer's handover off a place that has never spoken, which
     // is hundreds of points in the past.
     const playing = new Set(o.playing)
+    this.automatic.fill(false)
     for (let p = 0; p < o.roster && p < this.opts.players; p++) {
       if (!playing.has(p)) this.automatic[p] = true
     }
@@ -213,10 +221,10 @@ export class Match {
    * transmitting; its one blind spot is a room where everybody has gone quiet at
    * once, and that is exactly when nothing else will fire either.
    */
-  observe(now: number): Handover[] {
+  observe(held: Iterable<number>, now: number): Handover[] {
     // Nothing can be dated until the match says where it is — see `oriented`.
     if (!this.oriented) return []
-    const change = this.presence.look(this.held(), now)
+    const change = this.presence.look(held, now)
     const out: Handover[] = []
     for (const p of change.quiet) if (!this.automatic[p]) out.push(this.drive(p, true, now))
     for (const p of change.back) if (this.automatic[p]) out.push(this.drive(p, false, now))
@@ -233,13 +241,22 @@ export class Match {
   }
 
   /** A place nobody holds, or -1. What a latecomer can be given. */
-  vacant(): number {
+  vacant(held: Iterable<number>, where?: (player: number) => boolean): number {
     // A room that has forgotten the match has no place to give: seating
     // somebody in a match it cannot describe to them is worse than turning them
     // away, and it cannot describe one it has no history of.
     if (!this.running || !this.oriented) return -1
-    const held = new Set(this.held())
-    for (let p = 0; p < this.roster; p++) if (!held.has(p)) return p
+    // Free means nobody is answerable for it, never "the computer is driving
+    // it" — a place whose player has gone quiet is both, and giving it away
+    // takes it off somebody who is sitting right there. Who holds what is the
+    // room's own record and is asked for rather than kept here: a copy is a
+    // second answer to the same question, and the two drift.
+    const taken = new Set(held)
+    for (let p = 0; p < this.roster; p++) {
+      if (taken.has(p)) continue
+      if (where !== undefined && !where(p)) continue
+      return p
+    }
     return -1
   }
 
@@ -305,12 +322,6 @@ export class Match {
   }
 
   /** Who is answerable for a place right now. */
-  private held(): number[] {
-    const out: number[] = []
-    for (let p = 0; p < this.roster; p++) if (!this.automatic[p]) out.push(p)
-    return out
-  }
-
   /**
    * Change who drives a place: date it, record it, apply it.
    *
