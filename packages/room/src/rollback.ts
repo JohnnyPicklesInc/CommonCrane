@@ -66,7 +66,31 @@ export interface Sim<State> {
 
 export interface RollbackOptions<State> {
   readonly sim: Sim<State>
-  /** Places the match is laid out for, empty ones included. */
+  /**
+   * Places the match is laid out for, empty ones included.
+   *
+   * Nothing here caps it, and it should not be read as an invitation. Rollback
+   * costs more than linearly in this number and the third cost is the one that
+   * bites:
+   *
+   * Every input reaches every other player, so the relaying is quadratic — at
+   * thirty-two places and sixty a second that is around sixty thousand sends a
+   * second through whatever single object is doing the relaying. Every client
+   * steps every place, every point, and again for each point a rewind replays.
+   * And `shouldStall` is a maximum over all peers rather than an average: one
+   * player more than `window` behind stops everybody. With two that is
+   * occasional; with thirty somebody is always behind, so the match runs
+   * permanently at the speed of its worst connection — and never triggers the
+   * cure, because handing a place to the computer waits on silence and a slow
+   * player is not silent.
+   *
+   * Small numbers, then: the games this was taken from run two to eight. Dozens
+   * is not a bigger number of the same thing, it is a different netcode — a
+   * server that steps the simulation once and sends each player what they can
+   * see, which costs N messages instead of N squared and makes nobody wait for
+   * anybody. `streamClock` and `Sim` are already the right shape for it; that
+   * layer is simply not written.
+   */
   readonly players: number
   /** Which of those this machine supplies input for. */
   readonly localPlayers: number[]
