@@ -11,6 +11,7 @@
 
 export interface Listed {
   readonly code: string
+  /** What the host calls themselves. Another player's input — see `Arrival`. */
   readonly host: string
   readonly players: number
   readonly max: number

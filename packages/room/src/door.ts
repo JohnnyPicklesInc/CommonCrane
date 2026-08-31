@@ -28,6 +28,18 @@ export interface Doorway {
 
 /** Somebody at the door. */
 export interface Arrival {
+  /**
+   * A name somebody chose for themselves.
+   *
+   * Another player's input, and it travels: it reaches everybody else in the
+   * room, the public list, and the replay of a match somebody joins an hour
+   * later. Nothing here escapes it, because escaping depends on where it is
+   * going — markup, a canvas, a log line — and that is the game's to know. It
+   * *is* markup until it has been through something, and both a seat list and a
+   * room list are usually built as strings.
+   *
+   * Bound its length at the door, where the room can still refuse.
+   */
   readonly name: string
   /** What they are running. An empty string is a client too old to say. */
   readonly build: string

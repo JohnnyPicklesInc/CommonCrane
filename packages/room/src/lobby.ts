@@ -30,7 +30,13 @@ export interface LobbyOptions<Settings, Seat> {
 
 /** What everybody in the room is looking at. */
 export interface LobbyView<Settings, Seat> {
-  /** A name per chair, gaps as null. */
+  /**
+   * A name per chair, gaps as null.
+   *
+   * Other players' input, every one of them — see `Arrival`. This is the list
+   * most likely to be dropped straight into markup, and the one where doing so
+   * hands the room to whoever typed the cleverest name.
+   */
   readonly players: (string | null)[]
   /** Each person's own choice, per chair. */
   readonly seats: (Seat | null)[]

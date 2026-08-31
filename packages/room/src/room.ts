@@ -47,6 +47,7 @@ export interface Member<Who, Seat> {
   readonly who: Who
   /** Chairs this connection holds. One each usually; several for a couch. */
   readonly chairs: readonly number[]
+  /** What they call themselves. Another player's input — see `Arrival`. */
   readonly name: string
   /** This connection's own blob per chair. Never read here. */
   readonly seats?: readonly (Seat | undefined)[]
@@ -60,6 +61,7 @@ export interface Seating<Seat> {
   readonly roster: number
   /** The chair each place came from, in place order. */
   readonly chairs: readonly number[]
+  /** What each place calls itself. Another player's input — see `Arrival`. */
   readonly names: readonly string[]
   /** Each place's own blob, in place order. */
   readonly seats: readonly (Seat | null)[]
