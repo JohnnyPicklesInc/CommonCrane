@@ -54,8 +54,10 @@ describe('a different build', () => {
 
 describe('a match already running', () => {
   it('seats a newcomer to watch when a place is being kept warm', () => {
+    // With a chair: a watcher is in the room and on the roster, and takes that
+    // chair back with them when they ask to play.
     expect(admit({ ...open, started: true, vacant: 3 }, { name: 'Bo', build: 'v1' }))
-      .toEqual({ as: 'watch' })
+      .toEqual({ as: 'watch', chair: 0 })
   })
 
   it('turns them away when there is no place for them', () => {

@@ -35,7 +35,16 @@ export interface Arrival {
 
 export type Admission =
   | { readonly as: 'play'; readonly chair: number; readonly opener: boolean }
-  | { readonly as: 'watch' }
+  /**
+   * In, but not playing — a match is already running and there is a place
+   * being kept warm for them.
+   *
+   * They still get a chair: a watcher is in the room, is on the roster, and
+   * takes a chair back with them when they ask to play. Withholding it only
+   * made the caller work out the same answer a second time, which is how two
+   * answers to one question get the chance to differ.
+   */
+  | { readonly as: 'watch'; readonly chair: number }
   | { readonly as: 'refuse'; readonly reason: string }
 
 /**
@@ -75,6 +84,6 @@ export function admit(door: Doorway, arriving: Arrival): Admission {
     }
   }
 
-  if (door.started) return { as: 'watch' }
+  if (door.started) return { as: 'watch', chair }
   return { as: 'play', chair, opener }
 }
