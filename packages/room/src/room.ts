@@ -157,8 +157,22 @@ export interface RoomOptions<Who, Settings, Seat> {
   readonly keep?: number
   /** How many disagreement points to remember. */
   readonly recall: number
-  /** How often a listed room should re-confirm itself. */
+  /** How often a room with nothing going on should be looked at. */
   readonly heartbeatMs: number
+  /**
+   * How often a room with a match running should be looked at.
+   *
+   * Left out, the heartbeat does both, and that is usually far too slow to be
+   * a presence clock: a beat pitched to keep a listing alive is tens of
+   * seconds, which is also longer than a host keeps an idle object in memory —
+   * so by the time it fires the room has forgotten the match, and a resumed
+   * match rightly refuses to date anything until somebody contributes. A room
+   * that is actually being played is awake anyway, so looking at it every
+   * second costs nothing it was not already spending.
+   *
+   * One of these games worked that out for itself and the other did not.
+   */
+  readonly paceMs?: number
   readonly settings: Settings
   readonly checkSettings: Check<Settings>
   readonly checkSeat: Check<Seat>
@@ -295,6 +309,11 @@ export class Room<Who, Settings, Seat> {
     return this.lobby.view(seen, this.opts.capacity, (s, i) => this.nameOf(s.name, i), hostChair(seen))
   }
 
+  /** How long until this room next wants looking at. */
+  private beat(): number {
+    return this.running ? (this.opts.paceMs ?? this.opts.heartbeatMs) : this.opts.heartbeatMs
+  }
+
   /** Whether this connection holds the lowest chair, which is the host's. */
   isHost(who: Who, except?: Who): boolean {
     const chair = hostChair(this.seatedOf(except))
@@ -409,7 +428,7 @@ export class Room<Who, Settings, Seat> {
     }
     out.push({ kind: 'lobby', view: this.view() })
     out.push(this.listing())
-    out.push({ kind: 'wake', inMs: this.opts.heartbeatMs })
+    out.push({ kind: 'wake', inMs: this.beat() })
     return out
   }
 
@@ -538,6 +557,10 @@ export class Room<Who, Settings, Seat> {
       { kind: 'remember', state: this.lobby.snapshot(), started: true },
       { kind: 'begun', seating: laid },
       this.listing(),
+      // The cadence changes here. A room being played wants looking at often
+      // enough to notice silence, and saying so only at the next beat means
+      // the first beat of a match is still a lobby's.
+      { kind: 'wake', inMs: this.beat() },
     ]
   }
 
@@ -585,7 +608,7 @@ export class Room<Who, Settings, Seat> {
       if (quiet.length > 0) out.push({ kind: 'handovers', changes: quiet })
     }
     out.push(this.listing())
-    out.push({ kind: 'wake', inMs: this.opts.heartbeatMs })
+    out.push({ kind: 'wake', inMs: this.beat() })
     return out
   }
 

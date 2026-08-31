@@ -94,13 +94,28 @@ describe('the heartbeat', () => {
     expect(a.at).not.toBeNull()
   })
 
+  it('brings a pending one forward when asked for sooner', async () => {
+    // The bug this replaced. A room asks rarely while it is a lobby and often
+    // once a match is running; a pending lobby-length alarm swallowed every
+    // request for a shorter one, so the room went on being looked at once a
+    // minute for the whole match and nobody was ever noticed going quiet.
+    const a = alarms()
+    await beat(a, 45_000)
+    const slow = a.at
+    await beat(a, 1000)
+    expect(a.at).toBeLessThan(slow!)
+  })
+
   it('leaves a pending one alone rather than pushing it further out', async () => {
     // Rescheduling on every call is how a room that is busy never gets looked
     // at: each message moves the beat out again and it never arrives.
+    // Later than what is pending, so there is nothing to bring forward — and
+    // rescheduling on every call is how a busy room never gets looked at at
+    // all: each message moves the beat out again and it never arrives.
     const a = alarms()
     await beat(a, 45_000)
     const first = a.at
-    await beat(a, 45_000)
+    await beat(a, 60_000)
     expect(a.at).toBe(first)
   })
 

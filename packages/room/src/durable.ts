@@ -92,22 +92,25 @@ export interface Alarms {
 }
 
 /**
- * Keep a room's heartbeat running, or stop it.
+ * Look at this room again no later than `inMs`, or stop looking.
  *
- * `wake` from a `Room` says when it next wants looking at, and this is the
- * whole of carrying that out. Worth having in one place because the failure is
- * quiet in both directions: a room that stops scheduling stops noticing that
- * anybody has gone silent, and one that never stops runs a timer for ever on a
- * room nobody is in.
+ * "No later than" is the whole of it, and it took a bug to get right. Setting
+ * one only when there is none looks correct — inside `alarm()` the fired one
+ * has already been cleared, so it is also what schedules the next beat — but a
+ * room changes how often it wants looking at. It asks rarely while it is a
+ * lobby and often once a match is running, and a pending lobby-length alarm
+ * swallowed every request for a shorter one: the room went on being looked at
+ * once a minute for the whole match, and nobody was ever noticed going quiet.
  *
- * Only ever sets an alarm when there is not one already, because inside
- * `alarm()` the fired one has already been cleared — so this is also what
- * schedules the next beat.
+ * So a pending alarm later than the one asked for is brought forward, and one
+ * already sooner is left alone.
  */
 export async function beat(storage: Alarms, inMs: number | null): Promise<void> {
   if (inMs === null) {
     await storage.deleteAlarm()
     return
   }
-  if ((await storage.getAlarm()) === null) await storage.setAlarm(Date.now() + inMs)
+  const at = Date.now() + inMs
+  const pending = await storage.getAlarm()
+  if (pending === null || pending > at) await storage.setAlarm(at)
 }

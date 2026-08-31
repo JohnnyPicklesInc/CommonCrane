@@ -26,6 +26,7 @@ function room() {
     silenceMs: SILENCE,
     recall: 64,
     heartbeatMs: 45_000,
+    paceMs: 1000,
     settings: { mode: 0 },
     checkSettings: (raw) => {
       const m = (raw as Partial<Settings>)?.mode
@@ -234,6 +235,20 @@ describe('the clock', () => {
     expect(find(out, 'wake')?.inMs).toBeNull()
     // And in that order: stop the clock before the room is thrown away.
     expect(kinds(out).indexOf('wake')).toBeLessThan(kinds(out).indexOf('recycle'))
+  })
+
+  it('asks to be looked at often while a match is running, rarely otherwise', () => {
+    // A beat pitched to keep a public listing alive is far too slow to notice
+    // anybody going quiet — and slower than a host keeps an idle object, so by
+    // the time it fires the room has forgotten the match it was meant to judge.
+    const { r, join, sit, deal } = room()
+    join('Alice')
+    join('Bob')
+    expect(find(r.tick(0), 'wake')?.inMs).toBe(45_000)
+    sit('Alice', [0])
+    sit('Bob', [1])
+    deal(r.begin('Alice', 2, 0))
+    expect(find(r.tick(0), 'wake')?.inMs).toBe(1000)
   })
 
   it('says when it wants looking at again', () => {
