@@ -122,4 +122,18 @@ describe('waiting for somebody who has gone', () => {
     expect(r.stalled).toBe(true)
     expect(r.at).toBeLessThan(after + 200)
   })
+
+  it('stops waiting for a place the connection itself has lost', () => {
+    // Not a decision and not simulated. The room's decisions arrive over the
+    // same connection whose loss is the problem, so when the socket dies there
+    // is nobody left to say that nobody is left — and without this the game
+    // freezes within a window of a tab closing, with nothing on screen to
+    // explain it.
+    const r = engine(2, [0])
+    run(r, 400, 99, (t) => {
+      if (t === 150) r.unreachable(1)
+    })
+    expect(r.stalled).toBe(false)
+    expect(r.at).toBeGreaterThan(300)
+  })
 })

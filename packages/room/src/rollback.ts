@@ -40,9 +40,19 @@ export interface Sim<State> {
   step(s: State, inputs: readonly number[]): void
   /** A fingerprint. Equal states must agree; different ones should not. */
   hash(s: State): number
-  snapshot(s: State): number[]
-  /** Put a state back. False if the data is not one — a short read, a bad build. */
-  restore(s: State, data: readonly number[]): boolean
+  /**
+   * Write a state down, and read one back.
+   *
+   * Both optional, and together: they exist for compaction, which is itself
+   * optional — a match short enough never to reach its limit never needs
+   * either, and writing state serialisation for a large simulation is real
+   * work to do for a feature you have not asked for. Without them
+   * `takeSnapshot` returns nothing and a compacted origin is refused, which
+   * are the two things that would have used them.
+   */
+  snapshot?(s: State): number[]
+  /** False if the data is not a state — a short read, or a different build. */
+  restore?(s: State, data: readonly number[]): boolean
   /**
    * Whether this player is driving anything right now.
    *
@@ -179,6 +189,18 @@ export class Rollback<State> {
   private readonly autoFrom = new Map<number, { at: At; on: boolean }>()
   /** A whole assignment the room named a point for. Kept, because a rollback has to put it back. */
   private assignAt: { at: At; whole: unknown } | null = null
+  /**
+   * Places nothing is ever coming from again, whatever the room thinks.
+   *
+   * Not a decision and not simulated — a fact about this machine's connection
+   * rather than about the match, so it is never replayed and never rewound. It
+   * exists because the room's decisions arrive over the same connection whose
+   * loss is the problem: when the socket dies there is nobody left to tell us
+   * that nobody is left, and the guard below would otherwise wait for input
+   * from every peer for ever, freezing the game within a window of a tab
+   * closing with nothing on screen to say what had happened.
+   */
+  private readonly unheard = new Set<number>()
 
   /** Set while replaying a match somebody else already played. See `catchUp`. */
   private bulkLog: number[][] | null = null
@@ -229,6 +251,18 @@ export class Rollback<State> {
   /** Which places this machine speaks for. Changes when somebody takes a seat. */
   setLocal(players: number[]): void {
     ;(this.opts as { localPlayers: number[] }).localPlayers = players
+  }
+
+  /**
+   * Nothing more is coming from this place, and no decision is going to say so.
+   *
+   * For a connection that has gone rather than a player the room has replaced:
+   * a socket that dies announces nobody's departure, so the last thing it could
+   * have carried is the news that it was the last thing.
+   */
+  unreachable(player: number): void {
+    if (player < 0 || player >= this.opts.players) return
+    this.unheard.add(player)
   }
 
   /** Record a locally sampled input. Always authoritative for that player. */
@@ -468,10 +502,12 @@ export class Rollback<State> {
     const line = this.confirmed()
     if (line < 0 || line <= this.offeredThrough) return null
     if (line % this.opts.snapshotEvery !== 0) return null
+    const write = this.sim.snapshot
+    if (write === undefined) return null
     const slot = ((line % this.ringSize) + this.ringSize) % this.ringSize
     if (this.ringAt[slot] !== line) return null
     this.offeredThrough = line
-    return { at: line, data: this.sim.snapshot(this.ring[slot]!) }
+    return { at: line, data: write(this.ring[slot]!) }
   }
 
   /** The last `count` inputs for a local player, for the redundancy every message carries. */
@@ -519,6 +555,7 @@ export class Rollback<State> {
   private shouldStall(): boolean {
     for (let p = 0; p < this.opts.players; p++) {
       if (this.opts.localPlayers.includes(p)) continue
+      if (this.unheard.has(p)) continue
       if (this.autoFrom.get(p)?.on === true) continue
       if (!this.sim.holds(this.state, p)) continue
       if (this.at - this.lastReal[p]! > this.opts.window) return true
@@ -592,6 +629,10 @@ export class Rollback<State> {
   ): void {
     const from = origin?.at ?? 0
     if (origin != null) {
+      // A game that cannot read a state back cannot start from one. Refused
+      // rather than ignored: replaying a cut-back log from the beginning is not
+      // a worse version of arriving, it is arriving in a different match.
+      if (this.sim.restore === undefined) return
       if (!this.sim.restore(this.state, origin.data)) return
       for (let i = 0; i < this.ringSize; i++) this.ringAt[i] = -1
       this.sim.copy(this.prev, this.state)
