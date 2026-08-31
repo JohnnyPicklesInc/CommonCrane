@@ -306,4 +306,30 @@ describe('disagreement', () => {
     expect(kinds(r.fingerprint(60, 222))).toEqual(['disagreed'])
     expect(r.fingerprint(60, 333)).toEqual([])
   })
+
+describe('a watcher taking a place', () => {
+  it('is seated in one place and dated once, without reseating the room', () => {
+    // Two shapes of game. Where control stays with whoever was given it, this
+    // is the whole answer; where it wanders, the whole assignment has to be
+    // re-derived and `settle` is that. A game of the first kind broadcasting a
+    // whole lineup would be telling everybody about six places to change one.
+    const { r, join, sit, deal, members } = room()
+    join('Alice')
+    join('Bob')
+    sit('Alice', [0])
+    sit('Bob', [1])
+    deal(r.begin('Alice', 4, 0))
+    join('Zoe')
+    const place = r.take('Zoe', () => true)
+    expect(place).toBe(2)
+    const i = members.findIndex((m) => m.who === 'Zoe')
+    members[i] = { ...members[i]!, players: [place!] }
+    const dated = r.sit(place!, 0)
+    expect(dated.p).toBe(2)
+    expect(dated.on).toBe(false)
+    // Ahead of the log, not behind it: a point already gone past is one every
+    // client would have to rewind to, and some of them cannot reach.
+    expect(dated.at).toBeGreaterThanOrEqual(r.match.head)
+  })
+})
 })

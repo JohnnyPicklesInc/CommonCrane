@@ -57,8 +57,20 @@ export interface Member<Who, Seat> {
 
 /** What the room settled on at the drop, for everybody to build the same match. */
 export interface Seating<Seat> {
-  /** Places the match is laid out for, empty ones included. */
-  readonly roster: number
+  /**
+   * Places the match is laid out for, empty ones included.
+   *
+   * The room's own number and not the turnout: the spare places are the ones
+   * something automatic keeps warm, and they are exactly what a latecomer can
+   * be given. A game whose field size comes out of its own settings works this
+   * out and says so; one that always lays out for the whole room says that.
+   *
+   * It used to be called the roster and was two things at once — this, and
+   * whatever a game happened to call the number it sent its clients. One of
+   * them lays out six places whatever the turnout and means something else
+   * entirely by its roster, so the two were only ever equal by accident.
+   */
+  readonly places: number
   /** The chair each place came from, in place order. */
   readonly chairs: readonly number[]
   /** What each place calls itself. Another player's input — see `Arrival`. */
@@ -461,8 +473,8 @@ export class Room<Who, Settings, Seat> {
   }
 
   /** Everybody who has said what they want, in chair order, packed from zero. */
-  private layOut(roster: number): Seating<Seat> | null {
-    const places: { chair: number; name: string; seat: Seat; who: Who }[] = []
+  private layOut(places: number): Seating<Seat> | null {
+    const taken: { chair: number; name: string; seat: Seat; who: Who }[] = []
     for (const m of this.opts.members()) {
       for (let i = 0; i < m.chairs.length; i++) {
         const chair = m.chairs[i]!
@@ -474,32 +486,43 @@ export class Room<Who, Settings, Seat> {
         // who joins late is.
         if (seat === undefined) continue
         if (this.opts.plays !== undefined && !this.opts.plays(seat)) continue
-        places.push({ chair, name: this.nameOf(m.name, i), seat, who: m.who })
+        taken.push({ chair, name: this.nameOf(m.name, i), seat, who: m.who })
       }
     }
-    if (places.length === 0) return null
-    places.sort((a, b) => a.chair - b.chair)
+    if (taken.length === 0) return null
+    taken.sort((a, b) => a.chair - b.chair)
     const dealt: { who: Who; players: number[] }[] = []
     for (const m of this.opts.members()) {
       dealt.push({
         who: m.who,
-        players: m.chairs.map((c) => places.findIndex((p) => p.chair === c)).filter((i) => i >= 0),
+        players: m.chairs.map((c) => taken.findIndex((p) => p.chair === c)).filter((i) => i >= 0),
       })
     }
     return {
-      roster,
-      chairs: places.map((p) => p.chair),
-      names: places.map((p) => p.name),
-      seats: places.map((p) => p.seat),
+      // Never fewer than the turnout: somebody who is here and has said where
+      // they want to sit cannot be left off the field they are standing on.
+      places: Math.max(places, taken.length),
+      chairs: taken.map((p) => p.chair),
+      names: taken.map((p) => p.name),
+      seats: taken.map((p) => p.seat),
       dealt: dealt as Seating<Seat>['dealt'],
     }
+
   }
 
-  /** The host drops the puck. */
-  begin(who: Who, roster: number, now: number): Decision<Who, Settings, Seat>[] {
+  /**
+   * The drop.
+   *
+   * `places` is how many the match is laid out for, and it is the caller's to
+   * decide because only the game knows where the number comes from — a fixed
+   * field, or something out of its own settings. Bounded here by the room's
+   * capacity, because a match cannot be laid out for more places than there
+   * are chairs to fill them from.
+   */
+  begin(who: Who, places: number, now: number): Decision<Who, Settings, Seat>[] {
     if (!this.isHost(who) || this.running) return []
-    if (!Number.isInteger(roster) || roster < 1 || roster > this.opts.roster) return []
-    const laid = this.layOut(roster)
+    if (!Number.isInteger(places) || places < 1 || places > this.opts.roster) return []
+    const laid = this.layOut(places)
     if (laid === null) return []
     this.running = true
     this.prints.clear()
@@ -507,7 +530,7 @@ export class Room<Who, Settings, Seat> {
     // Everybody is present at the drop. Without this they are all silent since
     // the epoch and the room retires the lot of them on the first point.
     this.match.begin({
-      roster: this.opts.roster,
+      roster: laid.places,
       playing: laid.dealt.flatMap((d) => [...d.players]),
       now,
     })
@@ -608,6 +631,22 @@ export class Room<Who, Settings, Seat> {
     if (where === null) return mine.players.length === 0 ? null : -1
     const spare = this.match.vacant(this.holders(), where)
     return spare < 0 ? null : spare
+  }
+
+  /**
+   * Seat one person in one place, and date it.
+   *
+   * The other half of `take`, for a game where control belongs to whoever was
+   * given it and stays there. `settle` is for the other kind, where the whole
+   * assignment is re-derived because control wanders — one of these games hands
+   * you the ball-carrier, and there the only answer that holds is the whole
+   * seating at once.
+   *
+   * Called once the caller has actually moved them, because the point it is
+   * dated to depends on where everybody sits.
+   */
+  sit(player: number, now: number): Handover {
+    return this.match.seat(player, now)
   }
 
   /**
