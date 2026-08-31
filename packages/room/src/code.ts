@@ -26,10 +26,3 @@ export function makeCode(length = 4): string {
   for (const b of bytes) out += ALPHABET[b % ALPHABET.length]
   return out
 }
-
-/** Whether a string could be a code this minted. Cheap guard on a URL. */
-export function isCode(s: string, length = 4): boolean {
-  if (s.length !== length) return false
-  for (const c of s) if (!ALPHABET.includes(c)) return false
-  return true
-}

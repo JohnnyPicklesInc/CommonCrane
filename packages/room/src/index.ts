@@ -26,7 +26,7 @@ export { ContributionLog, type At, type LogOptions } from './log.ts'
 export { Watermark, type WatermarkOptions } from './watermark.ts'
 export { Fingerprints, type FingerprintsOptions } from './fingerprints.ts'
 export { freeChairs, hostChair, roster, resizeChairs, type Seated } from './seating.ts'
-export { makeCode, isCode } from './code.ts'
+export { makeCode } from './code.ts'
 export { admit, type Doorway, type Arrival, type Admission } from './door.ts'
 export { sift, type Listed, type Offer, type SiftOptions } from './listing.ts'
 export {

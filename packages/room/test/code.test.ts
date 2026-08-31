@@ -5,7 +5,7 @@
 // the suite stayed green and the count went down by four.
 
 import { describe, it, expect } from 'vitest'
-import { makeCode, isCode } from '../src/index.ts'
+import { makeCode } from '../src/index.ts'
 
 describe('a room code', () => {
   it('avoids the characters that get misread down a phone', () => {
@@ -33,21 +33,5 @@ describe('a room code', () => {
 
   it('can be asked for at another length', () => {
     expect(makeCode(6)).toHaveLength(6)
-    expect(isCode(makeCode(6), 6)).toBe(true)
-  })
-})
-
-describe('recognising one', () => {
-  it('accepts what it mints', () => {
-    for (let i = 0; i < 200; i++) expect(isCode(makeCode())).toBe(true)
-  })
-
-  it('rejects the wrong length, the wrong case and the banned characters', () => {
-    expect(isCode('ABC')).toBe(false)
-    expect(isCode('ABCDE')).toBe(false)
-    expect(isCode('abcd')).toBe(false)
-    expect(isCode('AB0D')).toBe(false)
-    expect(isCode('ABID')).toBe(false)
-    expect(isCode('')).toBe(false)
   })
 })
