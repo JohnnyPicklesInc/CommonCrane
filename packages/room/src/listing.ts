@@ -19,6 +19,16 @@ export interface Listed {
   readonly since: number
   /** Whether a match is under way, rather than a lobby waiting. */
   readonly live?: boolean
+  /**
+   * Whatever else a game wants somebody browsing to see.
+   *
+   * Opaque, like the settings and the seats, and for the same reason: what
+   * makes one room worth joining over another is the game's business. One of
+   * these wants the arena you would be walking into on the card; another would
+   * want the matchup. Neither is this list's to know, and a closed shape means
+   * the second game to want a field has to add it to the first game's library.
+   */
+  readonly about?: unknown
   /** The build this room plays. */
   readonly build: string
   /** When the room last confirmed it was still there. */
@@ -78,6 +88,7 @@ export function sift(
       players: e.players,
       max: e.max,
       since: e.since,
+      about: e.about,
       // Entries written before rooms in play were listed at all have nothing
       // here, and those were all lobbies.
       live: e.live === true,

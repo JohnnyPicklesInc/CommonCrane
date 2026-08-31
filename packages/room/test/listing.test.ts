@@ -74,4 +74,15 @@ describe('what is thrown away', () => {
     const { offers } = sift([['a', room({ updated: NOW - STALE + 1 })]], opts)
     expect(offers).toHaveLength(1)
   })
+
+it('carries whatever else the game wanted shown', () => {
+  // Opaque, like the settings. One game wants the arena on the card, another
+  // the matchup; a closed shape means the second one has to change the first
+  // one's library to say so.
+  const { offers } = sift(
+    [['g:AAAA', { code: 'AAAA', host: 'A', players: 1, max: 8, since: 5, build: 'v1', updated: 100, about: { arena: 'Dunes' } }]],
+    { build: 'v1', now: 100, staleMs: 1000 },
+  )
+  expect(offers[0]?.about).toEqual({ arena: 'Dunes' })
+})
 })
