@@ -33,7 +33,7 @@ function room() {
     },
     checkSeat: (raw) => (raw === 0 || raw === 1 ? (raw as Seat) : null),
     members: () => members,
-    defaultSeat: (chair) => (chair % 2) as Seat,
+    plays: (seat) => seat === 0 || seat === 1,
   })
   /** Do what a host would do with the decisions it was handed. */
   const apply = (name: string, out: Decision<string, Settings, Seat>[]) => {
@@ -117,6 +117,34 @@ describe('who gets in, and on whose terms', () => {
   })
 })
 
+describe('taking more chairs', () => {
+  it('describes the room only once the move has been made', () => {
+    // The trap this split exists for. A lobby handed back alongside a seating
+    // describes the room a moment before the seating — everybody is told about
+    // a change that has not happened, and the next thing they are told is the
+    // same room again.
+    const { r, join, members } = room()
+    join('Alice')
+    join('Bob')
+    const out = r.chairs('Bob', 3)
+    expect(kinds(out)).toEqual(['seated'])
+    expect(find(out, 'seated')?.chairs).toEqual([1, 2, 3])
+    // Only now, once the caller has moved them.
+    const i = members.findIndex((m) => m.who === 'Bob')
+    members[i] = { ...members[i]!, chairs: [1, 2, 3] }
+    const view = find(r.refresh(), 'lobby')!.view
+    expect(view.players.filter(Boolean).length).toBe(4)
+    expect(view.players.slice(1, 4)).toEqual(['Bob', 'Bob 2', 'Bob 3'])
+  })
+
+  it('hands over what is going spare rather than refusing', () => {
+    const { r, join } = room()
+    join('Alice')
+    join('Bob')
+    expect(find(r.chairs('Bob', 6), 'seated')?.chairs).toEqual([1, 2, 3, 4, 5])
+  })
+})
+
 describe('the drop', () => {
   it('numbers places from zero however the chairs fell', () => {
     // A lobby that lost its middle chair still starts a match numbered from
@@ -132,6 +160,20 @@ describe('the drop', () => {
     expect(begun.seating.chairs).toEqual([0, 2])
     expect(begun.seating.names).toEqual(['Alice', 'Carol'])
     expect(begun.seating.seats).toEqual([0, 0])
+  })
+
+  it('leaves out somebody who asked for no preference', () => {
+    // Not the same as not having answered. "Anywhere" is a thing people ask
+    // for, and the blob is opaque, so the room has to be told what it means.
+    const { r, join, sit, deal } = room()
+    join('Alice')
+    join('Bob')
+    sit('Alice', [0])
+    sit('Bob', [-1 as Seat])
+    const out = deal(r.begin('Alice', 2, 0))
+    expect(find(out, 'begun')!.seating.names).toEqual(['Alice'])
+    // And they are still in the room, and still shown in it.
+    expect(find(out, 'begun')!.seating.dealt.find((d) => d.who === 'Bob')?.players).toEqual([])
   })
 
   it('leaves out anybody who has not said where they want to sit', () => {
@@ -176,6 +218,24 @@ describe('the clock', () => {
     expect(changes.every((c) => c.on)).toBe(true)
   })
 
+  it('starts itself, rather than waiting for a beat that never comes', () => {
+    // A heartbeat only ever rescheduled by itself never starts. Everything
+    // works and forty-five seconds later the room falls off the list and
+    // nobody is noticed going quiet again — with nothing anywhere to say so.
+    const { join } = room()
+    expect(find(join('Alice'), 'wake')?.inMs).toBe(45_000)
+  })
+
+  it('stops when the last person goes', () => {
+    const { r, join, drop } = room()
+    join('Alice')
+    drop('Alice')
+    const out = r.depart('Alice', { name: 'Alice', players: [] }, 0)
+    expect(find(out, 'wake')?.inMs).toBeNull()
+    // And in that order: stop the clock before the room is thrown away.
+    expect(kinds(out).indexOf('wake')).toBeLessThan(kinds(out).indexOf('recycle'))
+  })
+
   it('says when it wants looking at again', () => {
     const { r, join } = room()
     join('Alice')
@@ -204,7 +264,7 @@ describe('leaving', () => {
     join('Alice', { announce: true })
     drop('Alice')
     const out = r.depart('Alice', { name: 'Alice', players: [] }, 0)
-    expect(kinds(out)).toEqual(['left', 'listed', 'recycle'])
+    expect(kinds(out)).toEqual(['left', 'listed', 'wake', 'recycle'])
     expect(find(out, 'listed')?.entry).toBeNull()
   })
 

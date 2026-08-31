@@ -23,26 +23,18 @@ export interface Sockets {
 }
 
 /**
- * What one connection holds, as this library needs it.
- *
- * A game adds its own fields; they ride along untouched. `chairs` and
- * `players` are the two the room asks about, and `name` is what everybody else
- * sees.
- */
-export interface Held {
-  chairs: number[]
-  name: string
-  players: number[]
-}
-
-/**
  * Read what a connection holds.
+ *
+ * The shape is the game's entirely, and is deliberately not constrained here.
+ * An attachment outlives a deploy — sockets stay connected while the object is
+ * replaced — so a library that insisted on its own field names would rename
+ * the contents of every room that happened to be occupied at the time.
  *
  * Never null: a socket the runtime handed back with nothing on it is one that
  * has just been accepted, and treating that as an error means a `catch` at
  * every call site instead of an empty room here.
  */
-export function held<H extends Held>(ws: Socket, blank: H): H {
+export function held<H>(ws: Socket, blank: H): H {
   const a = ws.deserializeAttachment() as H | null
   return a ?? blank
 }
@@ -57,7 +49,7 @@ export function held<H extends Held>(ws: Socket, blank: H): H {
  * silently, with the type checker perfectly happy because every field is still
  * present.
  */
-export function hold<H extends Held>(ws: Socket, blank: H, patch: Partial<H>): H {
+export function hold<H>(ws: Socket, blank: H, patch: Partial<H>): H {
   const next = { ...held(ws, blank), ...patch }
   ws.serializeAttachment(next)
   return next

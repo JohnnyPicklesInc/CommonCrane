@@ -2,12 +2,17 @@
 // does not lose anything.
 
 import { describe, it, expect } from 'vitest'
-import { held, hold, sendTo, broadcast, beat, type Socket, type Held } from '../src/durable.ts'
+import { held, hold, sendTo, broadcast, beat, type Socket } from '../src/durable.ts'
 
-interface Extra extends Held {
-  seats: number[]
+// A game's own shape, deliberately not the library's — the point being that
+// there isn't one.
+interface Whatever {
+  slots: number[]
+  name: string
+  players: number[]
+  teams: number[]
 }
-const blank: Extra = { chairs: [], name: '?', players: [], seats: [] }
+const blank: Whatever = { slots: [], name: '?', players: [], teams: [] }
 
 function socket(): Socket & { sent: string[]; store: unknown } {
   const s = {
@@ -36,9 +41,9 @@ describe('what a connection holds', () => {
     // spreading the old attachment over a new one by hand, and one short spread
     // loses somebody's name with the type checker perfectly happy.
     const ws = socket()
-    hold(ws, blank, { name: 'Alice', chairs: [0], seats: [1] })
+    hold(ws, blank, { name: 'Alice', slots: [0], teams: [1] })
     hold(ws, blank, { players: [2] })
-    expect(held(ws, blank)).toEqual({ name: 'Alice', chairs: [0], seats: [1], players: [2] })
+    expect(held(ws, blank)).toEqual({ name: 'Alice', slots: [0], teams: [1], players: [2] })
   })
 })
 

@@ -107,12 +107,27 @@ export type Decision<Who, Settings, Seat> =
     }
   /** Two clients have stopped playing the same game. */
   | { readonly kind: 'disagreed'; readonly at: At }
-  /** Put the room on the public list under these terms, or take it off. */
-  | { readonly kind: 'listed'; readonly entry: Listed | null }
+  /**
+   * Put the room on the public list under these terms, or take it off.
+   *
+   * `code` is carried rather than looked up afterwards, because taking a room
+   * off the list is the same moment it stops having one: read back from the
+   * room, the delisting has nothing to name and the entry sits there until it
+   * goes stale.
+   */
+  | { readonly kind: 'listed'; readonly entry: Listed | null; readonly code: string }
   /** Worth writing down. A room can lose its memory with people still in it. */
   | { readonly kind: 'remember'; readonly state: LobbyState<Settings>; readonly started: boolean }
-  /** Look at this room again in this many milliseconds. */
-  | { readonly kind: 'wake'; readonly inMs: number }
+  /**
+   * Look at this room again in this many milliseconds, or null to stop.
+   *
+   * It comes with the first arrival as well as with every beat, because a
+   * heartbeat only ever rescheduled by itself is one that never starts. The
+   * failure is silent in the worst way: everything works, and forty-five
+   * seconds later the room falls off the public list and nobody is ever
+   * noticed going quiet again.
+   */
+  | { readonly kind: 'wake'; readonly inMs: number | null }
   /** Everybody has gone. Throw the room away so its code can be used again. */
   | { readonly kind: 'recycle' }
 
@@ -143,9 +158,18 @@ export interface RoomOptions<Who, Settings, Seat> {
    * names, and "Chris 3" is enough for the person beside Chris to know which
    * one is theirs.
    */
-  readonly name?: (member: Member<Who, Seat>, index: number) => string
-  /** Where a place's blob comes from when nobody chose one. */
-  readonly defaultSeat: (chair: number) => Seat
+  readonly name?: (name: string, index: number) => string
+  /**
+   * Whether a chosen blob means they are in the match.
+   *
+   * Needed because the blob is opaque and "no preference" is a thing people
+   * ask for: a chair whose person has not said where they want to sit is left
+   * out of the numbering entirely rather than parked somewhere, so the place
+   * indices stay packed from zero and that person starts as a watcher. Without
+   * this the room would have to read the blob to tell those apart, which is
+   * the one thing it does not do. Everybody plays, if left out.
+   */
+  readonly plays?: (seat: Seat) => boolean
 }
 
 const defaultName = (name: string, i: number): string => (i === 0 ? name : `${name} ${i + 1}`)
@@ -238,11 +262,7 @@ export class Room<Who, Settings, Seat> {
     const out: Seated<Seat>[] = []
     for (const m of this.opts.members()) {
       if (except !== undefined && m.who === except) continue
-      out.push({
-        chairs: m.chairs,
-        name: m.name,
-        seats: m.chairs.map((c, i) => m.seats?.[i] ?? this.opts.defaultSeat(c)),
-      })
+      out.push({ chairs: m.chairs, name: m.name, seats: m.seats })
     }
     return out
   }
@@ -251,19 +271,14 @@ export class Room<Who, Settings, Seat> {
     return freeChairs(this.seatedOf(except), this.opts.capacity)
   }
 
-  private nameOf(m: Member<Who, Seat>, i: number): string {
-    return this.opts.name?.(m, i) ?? defaultName(m.name, i)
+  private nameOf(name: string, i: number): string {
+    return this.opts.name?.(name, i) ?? defaultName(name, i)
   }
 
   /** The room as everybody in it sees it. */
   private view(except?: Who): LobbyView<Settings, Seat> {
     const seen = this.seatedOf(except)
-    return this.lobby.view(
-      seen,
-      this.opts.capacity,
-      (s, i) => defaultName(s.name, i),
-      hostChair(seen),
-    )
+    return this.lobby.view(seen, this.opts.capacity, (s, i) => this.nameOf(s.name, i), hostChair(seen))
   }
 
   /** Whether this connection holds the lowest chair, which is the host's. */
@@ -281,10 +296,11 @@ export class Room<Who, Settings, Seat> {
     const taken = seen.reduce((n, s) => n + s.chairs.length, 0)
     const show =
       this.lobby.announced && this.lobby.code !== '' && taken > 0 && taken < this.opts.capacity
-    if (!show) return { kind: 'listed', entry: null }
+    if (!show) return { kind: 'listed', entry: null, code: this.lobby.code }
     const host = seen.reduce((a, b) => ((a.chairs[0] ?? 99) <= (b.chairs[0] ?? 99) ? a : b))
     return {
       kind: 'listed',
+      code: this.lobby.code,
       entry: {
         code: this.lobby.code,
         host: host.name,
@@ -379,21 +395,39 @@ export class Room<Who, Settings, Seat> {
     }
     out.push({ kind: 'lobby', view: this.view() })
     out.push(this.listing())
+    out.push({ kind: 'wake', inMs: this.opts.heartbeatMs })
     return out
   }
 
-  /** How many chairs this connection wants. */
+  /**
+   * How many chairs this connection wants.
+   *
+   * Only the move, and never the room afterwards. Anything describing the room
+   * as everybody sees it has to be asked for once the caller has actually made
+   * the move — this cannot see a change that has not happened yet, so a lobby
+   * returned alongside a seating describes the room as it was a moment ago.
+   * That is `refresh`, and the split is the same one `arrive` and `arrived`
+   * make for the same reason.
+   */
   chairs(who: Who, want: number): Decision<Who, Settings, Seat>[] {
     if (this.running) return []
     if (!Number.isInteger(want) || want < 1 || want > this.opts.capacity) return []
     const mine = this.opts.members().find((m) => m.who === who)
     if (mine === undefined) return []
-    const chairs = resizeChairs(mine.chairs, want, this.free())
-    return [
-      { kind: 'seated', who, chairs },
-      { kind: 'lobby', view: this.view() },
-      this.listing(),
-    ]
+    return [{ kind: 'seated', who, chairs: resizeChairs(mine.chairs, want, this.free()) }]
+  }
+
+  /**
+   * The room as everybody in it should now see it, and nothing else.
+   *
+   * For the paths that change what is on the screen without moving anybody:
+   * somebody picking a side, somebody changing their mind. Asking for it by
+   * pretending to resize a connection's chairs works and is a trap — it sends
+   * that person a fresh seating as well, which their client reads as having
+   * just walked in.
+   */
+  refresh(): Decision<Who, Settings, Seat>[] {
+    return [{ kind: 'lobby', view: this.view() }, this.listing()]
   }
 
   /** Somebody's own choice for one of their chairs. Theirs alone to make. */
@@ -437,7 +471,8 @@ export class Room<Who, Settings, Seat> {
         // which the game already knows how to be, because it is what everybody
         // who joins late is.
         if (seat === undefined) continue
-        places.push({ chair, name: this.nameOf(m, i), seat, who: m.who })
+        if (this.opts.plays !== undefined && !this.opts.plays(seat)) continue
+        places.push({ chair, name: this.nameOf(m.name, i), seat, who: m.who })
       }
     }
     if (places.length === 0) return null
@@ -624,6 +659,9 @@ export class Room<Who, Settings, Seat> {
       // Take the listing down before the room is thrown away: wiping the
       // storage loses the code the entry is filed under, so doing it the other
       // way round strands the entry until it goes stale.
+      // Named before the room forgets it: the delisting has to say which entry
+      // it means, and a moment later there is nothing left to ask.
+      const code = this.lobby.code
       this.running = false
       this.laid = null
       this.match.end()
@@ -635,7 +673,8 @@ export class Room<Who, Settings, Seat> {
         code: '',
         since: 0,
       })
-      out.push({ kind: 'listed', entry: null })
+      out.push({ kind: 'listed', entry: null, code })
+      out.push({ kind: 'wake', inMs: null })
       out.push({ kind: 'recycle' })
       return out
     }
