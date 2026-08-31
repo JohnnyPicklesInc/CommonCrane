@@ -86,6 +86,16 @@ export interface RollbackOptions<State> {
   readonly catchupSlack: number
   /** How many extra points one frame may spend closing that gap. */
   readonly catchupPerFrame: number
+  /**
+   * Keep every input the match actually stepped with, for a replay file.
+   *
+   * Off by default, because it is the one thing here that grows with the
+   * length of a match rather than with the window. On, it is what turns "he
+   * let another one in from the blue line" into a file that fails: a bench
+   * never plays the game a person plays, so without a recording half of what
+   * gets reported cannot be reproduced, let alone tested.
+   */
+  readonly record?: boolean
 }
 
 /** A change of driver, dated to a point everybody can still reach. */
@@ -112,6 +122,14 @@ export class Rollback<State> {
   private readonly lastValue: number[] = []
   private readonly lastReal: At[] = []
   private readonly hashAt = new Map<At, number>()
+  /**
+   * Every input the match stepped with, by player and point. See `record`.
+   *
+   * Written where `used` is written and indexed by point rather than appended,
+   * so a resimulated point overwrites its own earlier guess and what is left
+   * at the end is what really happened.
+   */
+  private readonly taped: number[][] = []
   private readonly water: Watermark
   private nextHash: number
   private acc = 0
@@ -323,7 +341,10 @@ export class Rollback<State> {
     const inputs = new Array<number>(this.opts.players)
     for (let p = 0; p < this.opts.players; p++) {
       const packed = this.inputFor(p, t)
-      if (!light) this.used[p]!.set(t, packed)
+      if (!light) {
+        this.used[p]!.set(t, packed)
+        if (this.opts.record === true) (this.taped[p] ??= [])[t] = packed
+      }
       inputs[p] = packed
     }
     this.sim.step(this.state, inputs)
@@ -341,6 +362,44 @@ export class Rollback<State> {
     if (!light && t % this.opts.hashEvery === 0) {
       this.hashAt.set(t, this.sim.hash(this.state))
     }
+  }
+
+  /**
+   * The match so far, as something that can be played again from nothing.
+   *
+   * Holes are filled with the last value rather than left sparse: a point a
+   * player never spoke for is one they repeated themselves on, which is what
+   * the prediction does anyway, and it keeps the file a plain rectangle.
+   * Empty unless `record` was set.
+   */
+  tape(): number[][] {
+    const to = this.at
+    const rows: number[][] = []
+    for (let p = 0; p < this.opts.players; p++) {
+      const row = new Array<number>(to)
+      let last = this.opts.idle
+      for (let t = 0; t < to; t++) {
+        last = this.taped[p]?.[t] ?? last
+        row[t] = last
+      }
+      rows.push(row)
+    }
+    return rows
+  }
+
+  /** The newest point each player's real input is known for. For diagnostics. */
+  lastRealAt(): At[] {
+    return this.lastReal.slice()
+  }
+
+  /**
+   * Which places the room has said are changing hands, and when.
+   *
+   * Whether a decision arrived at all is the first question to ask of a machine
+   * playing a different game from everybody else.
+   */
+  schedule(): { p: number; at: At; on: boolean }[] {
+    return [...this.autoFrom].map(([p, d]) => ({ p, at: d.at, on: d.on }))
   }
 
   /** Everything that happened since the last drain. */
