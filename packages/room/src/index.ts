@@ -28,6 +28,13 @@ export { freeChairs, hostChair, roster, resizeChairs, type Seated } from './seat
 export { makeCode, isCode } from './code.ts'
 export { admit, type Doorway, type Arrival, type Admission } from './door.ts'
 export { sift, type Listed, type Offer, type SiftOptions } from './listing.ts'
+export {
+  Lobby,
+  type LobbyOptions,
+  type LobbyView,
+  type LobbyState,
+  type Check,
+} from './lobby.ts'
 export { Presence, type PresenceOptions, type PresenceChange } from './presence.ts'
 export {
   DecisionLog,
