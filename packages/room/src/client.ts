@@ -121,3 +121,137 @@ export function roomFromUrl(): string | null {
 export function inviteUrl(code: string): string {
   return `${location.origin}${location.pathname}?room=${code}`
 }
+
+// ---------------------------------------------------------------------------
+// Noticing that this bundle is out of date.
+//
+// This is here rather than in a game because the room is what makes it matter.
+// `admit` refuses to seat two clients on different builds — different builds
+// disagree about speeds, sizes and the order things happen in, and come apart
+// on the first point with nothing on screen to explain it. So somebody left on
+// yesterday's bundle does not get a slightly stale game, they get turned away
+// at the door. The library sets that rule; leaving every game to notice on its
+// own is the wrong way round.
+//
+// A generated service-worker registration registers once on load and never asks
+// again, so a tab left open never learns about a deploy and a returning visit
+// is served the old bundle out of the old worker's precache. Hence: ask on a
+// schedule, and tell the player.
+
+export interface UpdateOptions {
+  /** What this bundle is. The same string the room is told on connect. */
+  readonly build: string
+  /**
+   * Where the origin says what it is serving right now.
+   *
+   * Must answer `{"build": "..."}` and must not be precached — the worker is
+   * precisely the thing holding the old copy, so asking it is asking the wrong
+   * party. Whatever builds the bundle has to write this beside it, stamped the
+   * same way `build` is.
+   */
+  readonly stamp?: string
+  /** How often an open tab asks. */
+  readonly everyMs?: number
+}
+
+/** What the origin is serving right now, or null if it cannot be reached. */
+async function deployed(stamp: string): Promise<string | null> {
+  try {
+    const r = await fetch(stamp, { cache: 'no-store' })
+    if (!r.ok) return null
+    const j = (await r.json()) as { build?: unknown }
+    return typeof j.build === 'string' ? j.build : null
+  } catch {
+    return null // offline, or the deploy is mid-flight. Ask again later.
+  }
+}
+
+/**
+ * Watch for a newer build and call `onAvailable` once when there is one.
+ *
+ * Two signals, because either can arrive first. The origin's stamp is the
+ * authority — it knows a deploy happened even if this browser's worker has not
+ * noticed. And a worker taking over the page means new code is already
+ * installed underneath us, which is worth saying immediately.
+ *
+ * Once, and never again: a player who has been told and carried on does not
+ * need telling every minute. Nothing reloads on its own either — being thrown
+ * out of a game because a deploy landed is worse than playing a version behind
+ * for another minute. What to show them is the game's; `applyUpdate` is what
+ * to call when they say yes.
+ *
+ * Returns a function that stops watching.
+ */
+export function watchForUpdates(opts: UpdateOptions, onAvailable: () => void): () => void {
+  const stamp = opts.stamp ?? '/build.json'
+  const everyMs = opts.everyMs ?? 60_000
+  let announced = false
+  let stopped = false
+  const announce = (): void => {
+    if (announced || stopped) return
+    announced = true
+    onAvailable()
+  }
+
+  const poll = async (): Promise<void> => {
+    const there = await deployed(stamp)
+    if (there !== null && there !== opts.build) announce()
+  }
+
+  const timers: ReturnType<typeof setInterval>[] = []
+  const stop = (): void => {
+    stopped = true
+    for (const t of timers) clearInterval(t)
+  }
+
+  const sw = typeof navigator === 'undefined' ? undefined : navigator.serviceWorker
+  if (sw === undefined) {
+    void poll()
+    timers.push(setInterval(() => void poll(), everyMs))
+    return stop
+  }
+
+  // No controller means a first-ever install claiming the page: nothing stale
+  // is being replaced, so that is not news.
+  const wasControlled = sw.controller !== null
+  sw.addEventListener('controllerchange', () => {
+    if (wasControlled) announce()
+  })
+
+  void sw.ready.then((reg) => {
+    const check = (): void => {
+      void reg.update().catch(() => {
+        // Offline, or the worker is gone. The next check can try again.
+      })
+      void poll()
+    }
+    check()
+    timers.push(setInterval(check, everyMs))
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) check()
+      })
+    }
+  })
+  return stop
+}
+
+/**
+ * Take the newer build.
+ *
+ * The worker is updated first and only then does the page reload, because a
+ * plain reload is served by whatever worker is still installed — which is the
+ * old one, and the reload would come back to exactly where it started.
+ */
+export async function applyUpdate(): Promise<void> {
+  const sw = typeof navigator === 'undefined' ? undefined : navigator.serviceWorker
+  if (sw !== undefined) {
+    try {
+      const reg = await sw.ready
+      await reg.update()
+    } catch {
+      // Nothing to update against; the reload below is still worth a try.
+    }
+  }
+  location.reload()
+}
