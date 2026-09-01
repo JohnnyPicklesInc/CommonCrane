@@ -3,10 +3,13 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "workspaces": ["packages/*"],
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "typecheck": "tsc -b --noEmit packages/room",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:consumers": "node scripts/consumers.mjs"
   },
   "devDependencies": {
     "typescript": "^5.9.0",
