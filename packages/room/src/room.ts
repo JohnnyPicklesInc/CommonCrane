@@ -323,6 +323,40 @@ export class Room<Who, Settings, Seat> {
     return false
   }
 
+  /** What the last listing said, so an unchanged one is not said again. */
+  private said = ''
+  private saidAt = -Infinity
+
+  /**
+   * The listing, but only when there is any point in saying it again.
+   *
+   * For the clock, which now runs often enough to notice somebody going quiet
+   * — and a listing is a call to another object, so saying it on every beat
+   * turns a room being played into one making a cross-object call a second,
+   * for ever, whether or not anything changed. A private room's is a request
+   * to remove an entry it never had.
+   *
+   * That is not merely wasteful. A host that gates incoming events behind an
+   * outstanding call spends the gap not relaying anybody's input, and a match
+   * where two people are each waiting on the other stops dead.
+   *
+   * Every other caller is an actual change — somebody arrived, took a chair,
+   * started a match — and says it unconditionally.
+   */
+  private worthSaying(now: number): Extract<Decision<Who, Settings, Seat>, { kind: 'listed' }> | null {
+    const d = this.listing() as Extract<Decision<Who, Settings, Seat>, { kind: 'listed' }>
+    // Everything but when it was last confirmed, which differs every time and
+    // is the whole reason a plain comparison would never match.
+    const what =
+      d.entry === null
+        ? `off:${d.code}`
+        : `${d.code}|${d.entry.host}|${d.entry.players}|${d.entry.max}|${d.entry.live}|${d.entry.build}`
+    if (what === this.said && now - this.saidAt < this.opts.heartbeatMs) return null
+    this.said = what
+    this.saidAt = now
+    return d
+  }
+
   /** Whether the room belongs on the public list right now, and as what. */
   private listing(except?: Who): Decision<Who, Settings, Seat> {
     const seen = this.seatedOf(except)
@@ -613,7 +647,8 @@ export class Room<Who, Settings, Seat> {
       const quiet = this.match.observe(this.holders(), now)
       if (quiet.length > 0) out.push({ kind: 'handovers', changes: quiet })
     }
-    out.push(this.listing())
+    const listed = this.worthSaying(now)
+    if (listed !== null) out.push(listed)
     out.push({ kind: 'wake', inMs: this.beat() })
     return out
   }

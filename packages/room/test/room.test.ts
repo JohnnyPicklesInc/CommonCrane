@@ -257,6 +257,39 @@ describe('the clock', () => {
     expect(kinds(out).indexOf('wake')).toBeLessThan(kinds(out).indexOf('recycle'))
   })
 
+  it('does not offer the same listing again on every beat', () => {
+    // The clock runs often enough to notice somebody going quiet, and a
+    // listing is a call to another object. Said on every beat, a room being
+    // played makes one a second for ever whether or not anything changed — and
+    // a host that gates incoming events behind an outstanding call spends that
+    // gap not relaying anybody's input. A match where two people are each
+    // waiting on the other stops dead.
+    const { r, join } = room()
+    join('Alice', { announce: true })
+    join('Bob')
+    expect(kinds(r.tick(0))).toContain('listed')
+    expect(kinds(r.tick(1000))).not.toContain('listed')
+    expect(kinds(r.tick(2000))).not.toContain('listed')
+  })
+
+  it('offers it again when something about it changed', () => {
+    const { r, join } = room()
+    join('Alice', { announce: true })
+    r.tick(0)
+    join('Bob')
+    expect(kinds(r.tick(1000))).toContain('listed')
+  })
+
+  it('and again when it has gone long enough to go stale', () => {
+    // An entry outlives its last confirmation by a while and no longer; a room
+    // that stopped confirming would quietly fall off the board.
+    const { r, join } = room()
+    join('Alice', { announce: true })
+    r.tick(0)
+    expect(kinds(r.tick(1000))).not.toContain('listed')
+    expect(kinds(r.tick(45_000))).toContain('listed')
+  })
+
   it('asks to be looked at often while a match is running, rarely otherwise', () => {
     // A beat pitched to keep a public listing alive is far too slow to notice
     // anybody going quiet — and slower than a host keeps an idle object, so by
