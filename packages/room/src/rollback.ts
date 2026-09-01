@@ -72,6 +72,19 @@ export interface Sim<State> {
   assign?(s: State, whole: unknown): void
   /** What happened this point, as a bitmask, for anything that reacts to events. */
   events?(s: State): number
+  /**
+   * A world part way between two the authority described, for drawing.
+   *
+   * Only a game knows which parts of its state are continuous. A position
+   * blends; a health, a weapon and an ammo count do not — halfway between
+   * eighty hit points and forty is not a number anybody has. Nor is a blend of
+   * two unit vectors a unit vector, nor two positions either side of a respawn
+   * a place anybody stood.
+   *
+   * Presentation only: nothing produced by this is ever stepped or hashed, and
+   * it is never called by the rollback layer at all.
+   */
+  blend?(into: State, a: readonly number[], b: readonly number[], alpha: number): boolean
 }
 
 export interface RollbackOptions<State> {
