@@ -160,4 +160,36 @@ describe('waiting for somebody who has gone', () => {
     run(r, 200, -1)
     expect(r.stalled).toBe(true)
   })
+
+  it('has something to say the moment it is given a place', () => {
+    // The deadlock. Everybody else starts waiting on whoever was just given a
+    // place; that machine cannot say anything, because saying it means having
+    // sampled and sampling happens inside the advance the waiting has stopped.
+    // Both sides wait for each other and only giving the place back ends it.
+    const r = engine(2, [])
+    // Nobody is in place 1, and nobody ever has been — which is what a place a
+    // watcher is about to be given looks like.
+    r.handover(1, 0, true)
+    run(r, 100, -1)
+    expect(r.localRun(1, 8).f.length).toBe(0)
+    // Given it, on a point a little ahead, as a room dates it.
+    r.handover(1, r.at + 12, false)
+    // There is something to send for it at once, rather than only after a point
+    // has been played that may never be reached.
+    expect(r.localRun(1, 8).f.length).toBeGreaterThan(0)
+  })
+
+  it('and nobody counts them late for the time before they had it', () => {
+    const r = engine(2, [0])
+    // Place 1 is the computer's from the start, which is what a place nobody
+    // is in looks like — so there is nobody to wait for.
+    r.handover(1, 0, true)
+    run(r, 200, -1)
+    expect(r.stalled).toBe(false)
+    // And now it is somebody's. They have never said a word, and the two
+    // hundred points before it was theirs are not theirs to be late for.
+    r.handover(1, r.at + 12, false)
+    run(r, 20, -1)
+    expect(r.stalled).toBe(false)
+  })
 })

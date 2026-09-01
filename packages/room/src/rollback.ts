@@ -335,7 +335,20 @@ export class Rollback<State> {
     if (had !== undefined && had.at === at && had.on === on) return
     this.autoFrom.set(player, { at, on })
     if (on) this.water.released(player, at)
-    else this.water.reclaimed(player, at)
+    else {
+      this.water.reclaimed(player, at)
+      // Nobody is late on the point they are given something — and that has to
+      // be true from the moment the decision arrives, not from the point it
+      // names.
+      //
+      // Left until the point is played, it deadlocks a room. Everybody else
+      // starts waiting on the new holder; the new holder cannot say anything,
+      // because saying it means having sampled, and sampling happens inside
+      // the advance that the waiting has already stopped. Everybody waits for
+      // somebody who is themselves waiting, and only giving the place back
+      // ends it.
+      if (this.lastReal[player]! < at) this.lastReal[player] = at
+    }
     if (at < this.at) this.rewindTo(at)
   }
 
