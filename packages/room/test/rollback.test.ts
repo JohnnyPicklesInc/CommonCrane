@@ -236,4 +236,22 @@ describe('waiting for somebody who has gone', () => {
     expect(on.length).toBeGreaterThan(0)
     expect(on[0]!.behind).toBeGreaterThan(WINDOW)
   })
+
+  it('is not kept waiting for ever by somebody repeating themselves', () => {
+    // The one that froze a real match. Every message carries a couple of dozen
+    // points of redundancy, so a client that has itself stopped goes on sending
+    // the same run for ever. Counted as "they are back", it resets the patience
+    // on every frame and the wait never ends: two machines each waiting on the
+    // other, each hearing the other often enough to keep waiting.
+    const r = engine(2, [0], 1000)
+    run(r, 130, 99)
+    expect(r.stalled).toBe(true)
+    // Their last words, over and over, exactly as a stopped client sends them.
+    for (let i = 0; i < 200; i++) {
+      r.applyRemote(1, 92, [1, 1, 1, 1, 1, 1, 1, 1])
+      r.setLocalInput(0, r.at, 1)
+      r.advance(16, () => {})
+    }
+    expect(r.stalled).toBe(false)
+  })
 })

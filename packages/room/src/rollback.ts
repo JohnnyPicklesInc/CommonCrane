@@ -322,6 +322,8 @@ export class Rollback<State> {
   applyRemote(player: number, from: At, packed: readonly number[]): void {
     if (player < 0 || player >= this.opts.players) return
     let earliest = -1
+    /** Whether any of this was news — see the note further down. */
+    let moved = false
     for (let i = 0; i < packed.length; i++) {
       const t = from + i
       const v = packed[i]!
@@ -330,12 +332,21 @@ export class Rollback<State> {
       if (t > this.lastReal[player]!) {
         this.lastReal[player] = t
         this.lastValue[player] = v
+        moved = true
       }
       const was = this.used[player]!.get(t)
       if (was !== undefined && was !== v && (earliest < 0 || t < earliest)) earliest = t
     }
-    // They are back, so whatever was decided about their silence is over.
-    if (packed.length > 0) {
+    // Back, and whatever was decided about their silence is over — but only if
+    // they have actually moved on.
+    //
+    // Every message carries a couple of dozen points of redundancy, so a client
+    // that has itself stopped goes on sending the same run for ever. Read as
+    // "they are back", that resets the patience below on every frame and it
+    // never runs out: two machines each waiting on the other, each hearing the
+    // other often enough to keep waiting, neither ever moving again. Which is
+    // exactly what it does.
+    if (moved) {
       this.unheard.delete(player)
       this.waited[player] = 0
     }
