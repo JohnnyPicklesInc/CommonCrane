@@ -714,6 +714,20 @@ export class Room<Who, Settings, Seat> {
   }
 
   /**
+   * Somebody gives a place up, and it goes to whatever drives it automatically.
+   *
+   * The other half of `sit`, and the pair of them is how one person changing
+   * their mind is expressed: one place given up, one taken, each dated on its
+   * own. Nobody else's is touched, which is the point — a whole reseating to
+   * move one person tells every other client something about every place, and
+   * a client that has not yet played the point it names goes on waiting for a
+   * place that has already stopped speaking.
+   */
+  stand(player: number, now: number): Handover[] {
+    return this.match.leave(player, now)
+  }
+
+  /**
    * Say who drives what, as one decision dated to one point.
    *
    * Called once the caller has actually moved somebody, because the answer

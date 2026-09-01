@@ -136,4 +136,28 @@ describe('waiting for somebody who has gone', () => {
     expect(r.stalled).toBe(false)
     expect(r.at).toBeGreaterThan(300)
   })
+
+  it('stops waiting for a place a whole assignment took away, at once', () => {
+    // The one that froze a real game. Somebody swaps benches, so they stop
+    // speaking for the place they left — and a client that has not yet played
+    // the point the assignment names goes on waiting for it. It cannot reach
+    // that point, because it is waiting.
+    const r = engine(2, [0])
+    run(r, 400, 99)
+    expect(r.stalled).toBe(true)
+    // The room says place 1 is nobody's, from a point still ahead of us.
+    r.lineup(r.at + 40, [0], [0])
+    run(r, 400, -1)
+    expect(r.stalled).toBe(false)
+    expect(r.at).toBeGreaterThan(300)
+  })
+
+  it('waits again for a place a whole assignment gave to somebody', () => {
+    // The other direction has to still hold: somebody is answerable for it now.
+    const r = engine(2, [0])
+    run(r, 200, 99)
+    r.lineup(r.at + 20, [0, 1], [0, 1])
+    run(r, 200, -1)
+    expect(r.stalled).toBe(true)
+  })
 })

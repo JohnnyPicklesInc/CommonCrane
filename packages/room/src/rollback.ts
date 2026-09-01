@@ -203,6 +203,16 @@ export class Rollback<State> {
   /** A whole assignment the room named a point for. Kept, because a rollback has to put it back. */
   private assignAt: { at: At; whole: unknown } | null = null
   /**
+   * Who the newest whole assignment says is answerable, or null.
+   *
+   * Kept apart from the blob because this layer has to read it and the blob is
+   * the game's. Read the moment it arrives rather than at the point it names,
+   * for the same reason a single handover is: a place the room has already
+   * given away is not one to wait for, and waiting for it until the point
+   * arrives is waiting for a point you cannot reach.
+   */
+  private assignDriving: readonly number[] | null = null
+  /**
    * Places nothing is ever coming from again, whatever the room thinks.
    *
    * Not a decision and not simulated — a fact about this machine's connection
@@ -339,6 +349,7 @@ export class Rollback<State> {
    */
   lineup(at: At, whole: unknown, driving: readonly number[]): void {
     this.assignAt = { at, whole }
+    this.assignDriving = [...driving]
     // The path that never told the watermark anything. A whole seating says who
     // is driving as surely as a single handover does, and a player left out of
     // it has stopped being read from `at` — which is the fact the line needs.
@@ -570,6 +581,16 @@ export class Rollback<State> {
       if (this.opts.localPlayers.includes(p)) continue
       if (this.unheard.has(p)) continue
       if (this.autoFrom.get(p)?.on === true) continue
+      // A whole assignment says the same thing about everybody at once, and
+      // says it now. Somebody who has left a place stops speaking for it
+      // immediately; a client that has not yet played the point the assignment
+      // names goes on waiting for a place that will never speak again — and
+      // cannot reach that point, because it is waiting.
+      //
+      // That is a room where one person swaps benches and everybody stops. It
+      // spreads: whoever is stuck also stops sending, so whoever was waiting on
+      // *them* stops too, and it walks around the room until nobody is moving.
+      if (this.assignDriving !== null && !this.assignDriving.includes(p)) continue
       if (!this.sim.holds(this.state, p)) continue
       if (this.at - this.lastReal[p]! > this.opts.window) return true
     }
