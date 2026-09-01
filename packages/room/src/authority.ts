@@ -86,6 +86,7 @@ export class Authority<State> {
   private readonly said: Map<At, number>[] = []
   private readonly lastSaid: number[] = []
   private acc = 0
+  private pending = 0
 
   constructor(opts: AuthorityOptions<State>) {
     this.opts = opts
@@ -110,6 +111,13 @@ export class Authority<State> {
 
   get at(): At {
     return this.sim.pointOf(this.state)
+  }
+
+  /** Everything that happened since the last drain. */
+  drainEvents(): number {
+    const e = this.pending
+    this.pending = 0
+    return e
   }
 
   /** A fingerprint of the world, for anybody who wants to check theirs. */
@@ -172,6 +180,11 @@ export class Authority<State> {
       this.said[p]!.delete(t)
     }
     this.sim.step(this.state, inputs)
+    // Per point, and gathered rather than read once a frame. A frame covers
+    // however many points fit inside it, so reading the mask when one is drawn
+    // keeps the last point's and silently drops the rest — which is most of
+    // them, and sounds like a gun that fires one shot in three.
+    if (this.sim.events !== undefined) this.pending |= this.sim.events(this.state)
     this.remember()
   }
 
