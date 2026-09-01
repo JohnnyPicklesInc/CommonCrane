@@ -254,4 +254,31 @@ describe('waiting for somebody who has gone', () => {
     }
     expect(r.stalled).toBe(false)
   })
+
+  it('says how long it has been stopped, not only that it is', () => {
+    // How long is the difference between flow control and a fault, and it is
+    // the caller's to judge — but it cannot judge what it is not told.
+    const r = engine(2, [0])
+    run(r, 130, 99)
+    const on = r.waitingOn()
+    expect(on.length).toBe(1)
+    expect(on[0]!.forMs).toBeGreaterThan(0)
+    expect(on[0]!.behind).toBeGreaterThan(WINDOW)
+  })
+
+  it('says how long it has said nothing for a place it holds', () => {
+    // A place this machine holds and has said nothing for is somebody who
+    // cannot play — a controller never wired to a piece they were given. It is
+    // silent by construction, because saying nothing is what it looks like from
+    // in here, so the only way anybody finds out is by being told the number.
+    const r = engine(2, [0, 1])
+    // Only place 0 is ever sampled; place 1 is held and never spoken for.
+    for (let t = 0; t < 60; t++) {
+      r.setLocalInput(0, r.at, 1)
+      r.advance(16, () => {})
+    }
+    const quiet = r.unsentFor()
+    expect(quiet.find((q) => q.p === 0)!.forMs).toBeLessThan(100)
+    expect(quiet.find((q) => q.p === 1)!.forMs).toBeGreaterThan(500)
+  })
 })

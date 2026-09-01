@@ -241,6 +241,8 @@ export class Rollback<State> {
   private readonly unheard = new Set<number>()
   /** How long each place has been the reason this machine is stopped. */
   private readonly waited: number[] = []
+  /** How long since anything was recorded for each place from this machine. */
+  private readonly since: number[] = []
 
   /** Set while replaying a match somebody else already played. See `catchUp`. */
   private bulkLog: number[][] | null = null
@@ -272,6 +274,7 @@ export class Rollback<State> {
       this.lastValue.push(opts.idle)
       this.lastReal.push(-1)
       this.waited.push(0)
+      this.since.push(0)
     }
     this.sim.copy(this.prev, this.state)
   }
@@ -308,6 +311,7 @@ export class Rollback<State> {
 
   /** Record a locally sampled input. Always authoritative for that player. */
   setLocalInput(player: number, at: At, packed: number): void {
+    this.since[player] = 0
     this.real[player]!.set(at, packed)
     if (at > this.lastReal[player]!) {
       this.lastReal[player] = at
@@ -629,12 +633,29 @@ export class Rollback<State> {
    * thrown away: "waiting for a peer" and "waiting for the third place, four
    * hundred points behind" are the same fact and only one of them is any use.
    */
-  waitingOn(): { p: number; behind: At }[] {
-    const out: { p: number; behind: At }[] = []
+  waitingOn(): { p: number; behind: At; forMs: number }[] {
+    const out: { p: number; behind: At; forMs: number }[] = []
     for (let p = 0; p < this.opts.players; p++) {
-      if (this.waitingFor(p)) out.push({ p, behind: this.at - this.lastReal[p]! })
+      if (this.waitingFor(p)) {
+        out.push({ p, behind: this.at - this.lastReal[p]!, forMs: this.waited[p]! })
+      }
     }
     return out
+  }
+
+  /**
+   * How long since anything was recorded for each place this machine speaks
+   * for.
+   *
+   * A fact, not a fault: it is a handful of milliseconds every frame in an
+   * ordinary match, and only the caller knows how long is too long. But a place
+   * this machine holds and has said nothing for is the shape of somebody who
+   * cannot play — a controller that was never wired to a piece they were given,
+   * a sampler that quietly returns — and it is silent by construction, because
+   * saying nothing is exactly what it looks like from in here.
+   */
+  unsentFor(): { p: number; forMs: number }[] {
+    return this.opts.localPlayers.map((p) => ({ p, forMs: this.since[p] ?? 0 }))
   }
 
   /**
@@ -674,6 +695,7 @@ export class Rollback<State> {
     // on without it. A room where one machine in trouble stops everybody is a
     // room where anything going wrong anywhere stops the match — a join that
     // does not take, most of all.
+    for (const p of this.opts.localPlayers) this.since[p]! += dtMs
     const patience = this.opts.patienceMs ?? 2000
     for (let p = 0; p < this.opts.players; p++) {
       if (!this.waitingFor(p)) {
