@@ -365,6 +365,73 @@ describe('a room that lost its memory', () => {
     const out = woken.r.arrive('Zoe', { name: 'Zoe', build: 'v1', announce: false, code: 'ABCD' }, 100)
     expect(kinds(out)).toEqual(['refuse'])
   })
+
+  it('picks it back up laid out for the places it was dropped with', () => {
+    // A room lays out for two places, is evicted, and comes back believing it
+    // has as many places as it could ever have. The first person to speak
+    // orients it — and the next latecomer is handed place two of a two-place
+    // match, which is a place no client has anything for.
+    //
+    // The layout is the one thing about a running match that the connections
+    // are no evidence of: the spare places are precisely the ones nobody is
+    // sitting in. So it is written down at the drop.
+    const { r, join, sit, deal, members } = room()
+    join('Alice'); join('Bob')
+    sit('Alice', [0]); sit('Bob', [1])
+    const begun = deal(r.begin('Alice', 2, 0))
+    const state = find(begun, 'remember')?.state
+    expect(state?.places).toBe(2)
+
+    const woken = room()
+    woken.members.push(...members)
+    woken.r.restore(state!, true)
+    // Somebody speaks, which is what tells a resumed room where the match is.
+    woken.r.input('Alice', 0, 0, [1, 2, 3], 100)
+    woken.members.push({ who: 'Zoe', chairs: [2], name: 'Zoe', seats: [], players: [] })
+    expect(woken.r.take('Zoe', () => true)).toBeNull()
+  })
+
+  it('falls back to the roster for a room written down before the layout was', () => {
+    // An older stored state has no layout in it. Nothing better is available,
+    // so it behaves as it did before — and is no worse off.
+    const { r, join, sit, deal, members } = room()
+    join('Alice'); join('Bob')
+    sit('Alice', [0]); sit('Bob', [1])
+    deal(r.begin('Alice', 2, 0))
+
+    const woken = room()
+    woken.members.push(...members)
+    woken.r.restore({ build: 'v1', code: 'ABCD', announced: false, since: 0 }, true)
+    woken.r.input('Alice', 0, 0, [1, 2, 3], 100)
+    woken.members.push({ who: 'Zoe', chairs: [2], name: 'Zoe', seats: [], players: [] })
+    expect(woken.r.take('Zoe', () => true)).toBe(2)
+  })
+
+  it('lays a rematch out for the places the drop settled on', () => {
+    // The seating everybody rebuilds from says one number; the match used to
+    // be started on another, so the room went on offering places the game had
+    // never been told about.
+    const { r, join, sit, deal } = room()
+    join('Alice'); join('Bob')
+    sit('Alice', [0]); sit('Bob', [1])
+    deal(r.begin('Alice', 2, 0))
+    r.input('Alice', 0, 0, [1], 0)
+    const again = r.rematch(10)
+    expect(find(again, 'begun')?.seating.places).toBe(2)
+    expect(r.match.places).toBe(2)
+  })
+})
+
+describe('the listing', () => {
+  it('is stamped from the moment it was given, not the wall clock', () => {
+    // The one line in the room that read a clock of its own. It is the field
+    // `sift` compares for staleness, so the least testable line in the file
+    // was the one feeding the staleness rule.
+    const { r, join } = room()
+    join('Alice', { announce: true })
+    expect(find(r.refresh(4242), 'listed')?.entry?.updated).toBe(4242)
+    expect(find(r.tick(9999), 'listed')?.entry?.updated).toBe(9999)
+  })
 })
 
 describe('disagreement', () => {

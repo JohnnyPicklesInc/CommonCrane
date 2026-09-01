@@ -605,28 +605,6 @@ export class Rollback<State> {
   }
 
   /**
-   * True when we are too far ahead of a peer and must wait for them.
-   *
-   * Two ways to stop waiting, and the second one is not an optimisation.
-   *
-   * A place the computer is already driving is not one to wait for — without
-   * that the handover changes nothing, because every peer goes on stopping for
-   * input that is never coming.
-   *
-   * And a place the room has *decided* goes to the computer is not one either,
-   * from the moment the decision arrives rather than from the point it names.
-   * Waiting until the point is reached only works while that point is inside
-   * the prediction window, and whether it is depends on a constant each game
-   * picks for itself. One of these two games picked a grace of twelve against a
-   * window of fourteen and never noticed; the other picked eighteen, and read
-   * the decision on arrival, which is the only reason it worked. Read on
-   * arrival, the two are the same and neither game has to keep a tuning
-   * constant inside a window to avoid a deadlock nobody would diagnose.
-   *
-   * A place handed *back* is waited for again, which is right: somebody has
-   * returned, and the nudge in `stepOnce` is what stops them being counted late
-   * for the time they were away.
-  /**
    * Which places are the reason this machine is stopped, and how far behind.
    *
    * The one thing worth knowing when a match has frozen, and it was being
@@ -676,7 +654,29 @@ export class Rollback<State> {
     return this.at - this.lastReal[p]! > this.opts.window
   }
 
-  /** True when we are too far ahead of a peer and must wait for them. */
+  /**
+   * True when we are too far ahead of a peer and must wait for them.
+   *
+   * Two ways to stop waiting, and the second one is not an optimisation.
+   *
+   * A place the computer is already driving is not one to wait for — without
+   * that the handover changes nothing, because every peer goes on stopping for
+   * input that is never coming.
+   *
+   * And a place the room has *decided* goes to the computer is not one either,
+   * from the moment the decision arrives rather than from the point it names.
+   * Waiting until the point is reached only works while that point is inside
+   * the prediction window, and whether it is depends on a constant each game
+   * picks for itself. One of these two games picked a grace of twelve against a
+   * window of fourteen and never noticed; the other picked eighteen, and read
+   * the decision on arrival, which is the only reason it worked. Read on
+   * arrival, the two are the same and neither game has to keep a tuning
+   * constant inside a window to avoid a deadlock nobody would diagnose.
+   *
+   * A place handed *back* is waited for again, which is right: somebody has
+   * returned, and the nudge in `stepOnce` is what stops them being counted late
+   * for the time they were away.
+   */
   private shouldStall(): boolean {
     for (let p = 0; p < this.opts.players; p++) if (this.waitingFor(p)) return true
     return false

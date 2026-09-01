@@ -56,6 +56,16 @@ export interface LobbyState<Settings> {
   readonly code: string
   /** When the room opened, for ordering the public list. */
   readonly since: number
+  /**
+   * How many places the running match was laid out for, or 0 for none.
+   *
+   * Remembered because it is the one thing about a running match that cannot
+   * be worked out again from the connections. Who is here is on the sockets
+   * and survives with them; how many places the game was laid out for is not,
+   * and the spare ones are precisely the places nobody is sitting in. Left to
+   * be guessed, a woken room guesses the largest number it knows.
+   */
+  readonly places: number
 }
 
 export class Lobby<Settings, Seat> {
@@ -70,6 +80,7 @@ export class Lobby<Settings, Seat> {
       build: '',
       code: '',
       since: 0,
+      places: 0,
     }
   }
 
@@ -91,6 +102,11 @@ export class Lobby<Settings, Seat> {
 
   get since(): number {
     return this.state.since
+  }
+
+  /** How many places the running match was laid out for. 0 for none. */
+  get places(): number {
+    return this.state.places
   }
 
   /**
@@ -123,6 +139,16 @@ export class Lobby<Settings, Seat> {
       announced: opts.announced,
       since: opts.now,
     }
+  }
+
+  /**
+   * How many places the match that has just started was laid out for.
+   *
+   * Set at the drop and read back after a room has lost its memory, which is
+   * the only moment the match itself cannot answer.
+   */
+  lay(places: number): void {
+    this.state = { ...this.state, places }
   }
 
   /**

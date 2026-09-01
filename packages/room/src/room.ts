@@ -277,7 +277,7 @@ export class Room<Who, Settings, Seat> {
    */
   private wake(now: number): void {
     if (!this.running || this.match.started) return
-    this.match.resume({ roster: this.opts.roster, playing: [...this.holders()], now })
+    this.match.resume({ roster: this.places(), playing: [...this.holders()], now })
   }
 
   private holders(): Set<number> {
@@ -307,6 +307,25 @@ export class Room<Who, Settings, Seat> {
   private view(except?: Who): LobbyView<Settings, Seat> {
     const seen = this.seatedOf(except)
     return this.lobby.view(seen, this.opts.capacity, (s, i) => this.nameOf(s.name, i), hostChair(seen))
+  }
+
+  /**
+   * How many places the running match is laid out for.
+   *
+   * Asked for rather than re-derived, because there are three places to ask
+   * and they used to give two different answers. `Match` holds it while it is
+   * running. The lobby state holds it across a room losing its memory, which
+   * is the one moment `Match` cannot answer — a resumed match knows it is
+   * running without knowing anything about the shape of it.
+   *
+   * `roster` is the fallback and not the answer: it is the most places this
+   * room could ever lay out, which is only the layout by coincidence. A room
+   * woken from a version that did not write the number down has nothing
+   * better, and is no worse off than it was.
+   */
+  private places(): number {
+    if (this.match.places > 0) return this.match.places
+    return this.lobby.places > 0 ? this.lobby.places : this.opts.roster
   }
 
   /** How long until this room next wants looking at. */
@@ -344,7 +363,7 @@ export class Room<Who, Settings, Seat> {
    * started a match — and says it unconditionally.
    */
   private worthSaying(now: number): Extract<Decision<Who, Settings, Seat>, { kind: 'listed' }> | null {
-    const d = this.listing() as Extract<Decision<Who, Settings, Seat>, { kind: 'listed' }>
+    const d = this.listing(now) as Extract<Decision<Who, Settings, Seat>, { kind: 'listed' }>
     // Everything but when it was last confirmed, which differs every time and
     // is the whole reason a plain comparison would never match.
     const what =
@@ -358,7 +377,7 @@ export class Room<Who, Settings, Seat> {
   }
 
   /** Whether the room belongs on the public list right now, and as what. */
-  private listing(except?: Who): Decision<Who, Settings, Seat> {
+  private listing(now: number, except?: Who): Decision<Who, Settings, Seat> {
     const seen = this.seatedOf(except)
     const taken = seen.reduce((n, s) => n + s.chairs.length, 0)
     const show =
@@ -376,7 +395,7 @@ export class Room<Who, Settings, Seat> {
         since: this.lobby.since,
         live: this.running,
         build: this.lobby.build,
-        updated: Date.now(),
+        updated: now,
       },
     }
   }
@@ -461,7 +480,7 @@ export class Room<Who, Settings, Seat> {
       out.push({ kind: 'arrived', who, name })
     }
     out.push({ kind: 'lobby', view: this.view() })
-    out.push(this.listing())
+    out.push(this.listing(now))
     out.push({ kind: 'wake', inMs: this.beat() })
     return out
   }
@@ -493,8 +512,8 @@ export class Room<Who, Settings, Seat> {
    * that person a fresh seating as well, which their client reads as having
    * just walked in.
    */
-  refresh(): Decision<Who, Settings, Seat>[] {
-    return [{ kind: 'lobby', view: this.view() }, this.listing()]
+  refresh(now = Date.now()): Decision<Who, Settings, Seat>[] {
+    return [{ kind: 'lobby', view: this.view() }, this.listing(now)]
   }
 
   /** Somebody's own choice for one of their chairs. Theirs alone to make. */
@@ -505,7 +524,7 @@ export class Room<Who, Settings, Seat> {
   }
 
   /** The host proposes what everybody plays. */
-  propose(who: Who, raw: unknown): Decision<Who, Settings, Seat>[] {
+  propose(who: Who, raw: unknown, now = Date.now()): Decision<Who, Settings, Seat>[] {
     const next = this.lobby.propose(this.isHost(who), this.running, raw)
     if (next === null) return []
     return [
@@ -516,18 +535,18 @@ export class Room<Who, Settings, Seat> {
       // playing — and this cannot know whether this game's is. Re-listing is
       // cheap and saying nothing leaves the board advertising a room that has
       // changed underneath it.
-      this.listing(),
+      this.listing(now),
     ]
   }
 
   /** Whether to offer the room publicly. The host's, like the settings. */
-  announce(who: Who, on: boolean): Decision<Who, Settings, Seat>[] {
+  announce(who: Who, on: boolean, now = Date.now()): Decision<Who, Settings, Seat>[] {
     if (this.running || typeof on !== 'boolean') return []
     if (!this.lobby.announce(this.isHost(who), on)) return []
     return [
       { kind: 'remember', state: this.lobby.snapshot(), started: this.running },
       { kind: 'lobby', view: this.view() },
-      this.listing(),
+      this.listing(now),
     ]
   }
 
@@ -586,6 +605,9 @@ export class Room<Who, Settings, Seat> {
     this.running = true
     this.prints.clear()
     this.laid = laid
+    // Written down at the drop, because it is the one thing about a running
+    // match that a room waking up with no memory cannot work out again.
+    this.lobby.lay(laid.places)
     // Everybody is present at the drop. Without this they are all silent since
     // the epoch and the room retires the lot of them on the first point.
     this.match.begin({
@@ -596,7 +618,7 @@ export class Room<Who, Settings, Seat> {
     return [
       { kind: 'remember', state: this.lobby.snapshot(), started: true },
       { kind: 'begun', seating: laid },
-      this.listing(),
+      this.listing(now),
       // The cadence changes here. A room being played wants looking at often
       // enough to notice silence, and saying so only at the next beat means
       // the first beat of a match is still a lobby's.
@@ -615,7 +637,7 @@ export class Room<Who, Settings, Seat> {
     if (!this.running || this.laid === null) return []
     if (this.match.head < 0) return []
     this.prints.clear()
-    this.match.begin({ roster: this.opts.roster, playing: [...this.holders()], now })
+    this.match.begin({ roster: this.laid.places, playing: [...this.holders()], now })
     return [{ kind: 'begun', seating: this.laid }]
   }
 
@@ -736,7 +758,8 @@ export class Room<Who, Settings, Seat> {
   settle(now: number): { at: At; driving: number[] } {
     const holders = this.holders()
     const changes: { p: number; on: boolean }[] = []
-    for (let p = 0; p < this.opts.roster; p++) changes.push({ p, on: !holders.has(p) })
+    const places = this.places()
+    for (let p = 0; p < places; p++) changes.push({ p, on: !holders.has(p) })
     const line = this.match.reassign(changes, now)
     return { at: line.at, driving: [...holders].sort((a, b) => a - b) }
   }
@@ -768,7 +791,7 @@ export class Room<Who, Settings, Seat> {
     if (this.running) {
       const changes: Handover[] = []
       for (const p of gone.players) {
-        if (p < 0 || p >= this.opts.roster) continue
+        if (p < 0 || p >= this.places()) continue
         changes.push(...this.match.leave(p, now))
       }
       if (changes.length > 0) out.push({ kind: 'handovers', changes })
@@ -791,6 +814,7 @@ export class Room<Who, Settings, Seat> {
         build: '',
         code: '',
         since: 0,
+        places: 0,
       })
       out.push({ kind: 'listed', entry: null, code })
       out.push({ kind: 'wake', inMs: null })
@@ -801,7 +825,7 @@ export class Room<Who, Settings, Seat> {
     // concerned, so it is excluded explicitly or a room that just emptied a
     // chair still advertises itself as full.
     out.push({ kind: 'lobby', view: this.view(who) })
-    out.push(this.listing(who))
+    out.push(this.listing(now, who))
     return out
   }
 }

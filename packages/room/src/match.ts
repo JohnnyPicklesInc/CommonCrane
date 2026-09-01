@@ -142,6 +142,19 @@ export class Match {
     return this.knowsWhere
   }
 
+  /**
+   * How many places the match is laid out for, empty ones included.
+   *
+   * The match's own number, and the one to ask for rather than keep a second
+   * copy of. A room's `roster` is the most places it could ever hold, which is
+   * a different number the moment a game lays out for fewer — and answering
+   * the first when you meant the second seats a latecomer in a place the match
+   * was never laid out for.
+   */
+  get places(): number {
+    return this.roster
+  }
+
   /** The newest point anybody has spoken for. */
   get head(): At {
     return this.contributions.head
