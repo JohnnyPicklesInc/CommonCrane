@@ -164,18 +164,19 @@ describe('one machine simulating for everybody', () => {
     expect(a.state.pos[0]).toBe(after! + 3 * 5)
   })
 
-  it('ignores anything said about a point already played', () => {
-    // There is no rewinding here. A frame describing that point has already
-    // gone out, and rewriting it is what this design exists to avoid.
+  it('does not replay a point already described, but does act on what it says', () => {
+    // Both halves matter. Frames describing those points have gone out, and
+    // rewriting them is what this design exists to avoid — so nothing is
+    // replayed. But what somebody said is still what they are doing, and
+    // discarding it discards nearly everything anybody but the host ever says.
     const a = authority(2)
     a.advance(TICK)
     a.advance(TICK)
-    const before = a.hash()
+    const at = a.at
     a.input(0, 0, [99])
+    expect(a.at).toBe(at) // nothing went back
     a.advance(TICK)
-    a.input(0, 1, [99])
-    expect(a.hash()).not.toBe(before) // it did advance
-    expect(a.state.pos[0]).toBe(0) // but nothing from the past landed
+    expect(a.state.pos[0]).toBe(99) // and it is what they are doing now
   })
 
   it('carries on from a world rather than starting again', () => {
@@ -204,5 +205,41 @@ describe('one machine simulating for everybody', () => {
     // somebody else's build and diverging from the first point.
     const b = new Authority<Toy>({ sim: toy(4), players: 4, tickMs: TICK, idle: 0, from: [1, 2] })
     expect(b.at).toBe(0)
+  })
+
+  it('still acts on input that arrived after the point it was stamped for', () => {
+    // Which is nearly all of it. This end advances while the input is in
+    // flight, so anything from anybody but the machine simulating arrives
+    // stamped for a point already played. Dropped, the only person who can
+    // move is whoever is simulating.
+    const a = authority(2)
+    for (let t = 0; t < 30; t++) a.advance(TICK)
+    const before = a.state.pos[1]
+    // Stamped for points long gone.
+    a.input(1, 5, [4, 4, 4])
+    for (let t = 0; t < 10; t++) a.advance(TICK)
+    expect(a.state.pos[1]).toBe(before! + 4 * 10)
+  })
+
+  it('takes the newest of a late run, not the oldest', () => {
+    // Runs carry redundancy, so most of one is already old news. What matters
+    // is what they are doing now, which is the last of them.
+    const a = authority(2)
+    for (let t = 0; t < 30; t++) a.advance(TICK)
+    const before = a.state.pos[1]
+    a.input(1, 0, [1, 2, 9])
+    a.advance(TICK)
+    expect(a.state.pos[1]).toBe(before! + 9)
+  })
+
+  it('still prefers something said for a point it has not reached', () => {
+    // A player running ahead of this end is saying what they will be doing,
+    // and that is better than what they were doing.
+    const a = authority(2)
+    for (let t = 0; t < 10; t++) a.advance(TICK)
+    a.input(1, 0, [3]) // late
+    a.input(1, a.at, [7]) // for the point about to be played
+    a.advance(TICK)
+    expect(a.state.pos[1]).toBe(7)
   })
 })

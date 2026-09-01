@@ -132,10 +132,23 @@ export class Authority<State> {
     const mine = this.said[player]!
     for (let i = 0; i < run.length; i++) {
       const at = from + i
-      // Nothing behind the present: the world at that point is already written
-      // down and sent, and rewriting history is what this design exists to
-      // avoid having to do.
-      if (at < this.at) continue
+      if (at < this.at) {
+        // Too late to be played where it was meant to be. That world has been
+        // described and sent, and there is no rewinding here.
+        //
+        // But it is still the newest thing this player has said they are
+        // doing, and throwing it away is throwing away nearly everything they
+        // ever say: over a wire this end advances during the trip, so input
+        // arrives stamped for a point already played almost every time. Only
+        // whoever is simulating is never late, because their own input never
+        // leaves the machine — which is exactly what it looked like, a room
+        // where one person could move and nobody else could.
+        //
+        // So it becomes what they are doing until they say otherwise. The run
+        // is in order, so the last of them is the newest.
+        this.lastSaid[player] = run[i]!
+        continue
+      }
       mine.set(at, run[i]!)
     }
   }
