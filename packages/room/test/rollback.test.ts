@@ -48,8 +48,15 @@ function toy(players: number): Sim<Toy> {
 
 const WINDOW = 14
 
-function engine(players: number, local: number[]) {
+/**
+ * `patienceMs` is enormous by default here so that a stall can be *observed*.
+ * Waiting is bounded in a real game — see the tests that say so — and most of
+ * these are about which places are worth waiting for at all, which is a
+ * separate question from how long.
+ */
+function engine(players: number, local: number[], patienceMs = 1e9) {
   return new Rollback<Toy>({
+    patienceMs,
     sim: toy(players),
     players,
     localPlayers: local,
@@ -191,5 +198,42 @@ describe('waiting for somebody who has gone', () => {
     r.handover(1, r.at + 12, false)
     run(r, 20, -1)
     expect(r.stalled).toBe(false)
+  })
+
+  it('carries on without somebody it has waited long enough for', () => {
+    // The prediction window is a hard mutual dependency: everybody stops for
+    // whoever is furthest behind, so one machine in trouble stops the room.
+    // Right for a moment, wrong for ever, and the difference is only time.
+    const r = engine(2, [0], 1000)
+    // Stopped, and still inside the time it is willing to wait.
+    run(r, 130, 99)
+    expect(r.stalled).toBe(true)
+    const stuck = r.at
+    // Past it, and going again.
+    run(r, 150, -1)
+    expect(r.stalled).toBe(false)
+    expect(r.at).toBeGreaterThan(stuck + 50)
+  })
+
+  it('waits for them again the moment they say anything', () => {
+    const r = engine(2, [0], 1000)
+    run(r, 130, 99)
+    run(r, 150, -1)
+    expect(r.stalled).toBe(false)
+    // Back, and worth waiting for again — the patience starts over with them.
+    r.applyRemote(1, r.at, [1])
+    run(r, 40, -1)
+    expect(r.stalled).toBe(true)
+  })
+
+  it('says which place it is stopped for, and how far behind', () => {
+    // "Waiting for a peer" and "waiting for the second place, four hundred
+    // points behind" are the same fact, and only one of them is any use when a
+    // match has frozen and somebody has to work out why.
+    const r = engine(3, [0])
+    run(r, 300, 99)
+    const on = r.waitingOn()
+    expect(on.length).toBeGreaterThan(0)
+    expect(on[0]!.behind).toBeGreaterThan(WINDOW)
   })
 })

@@ -134,6 +134,21 @@ export interface RollbackOptions<State> {
   /** How many extra points one frame may spend closing that gap. */
   readonly catchupPerFrame: number
   /**
+   * How long to wait for one place before carrying on without it.
+   *
+   * The prediction window is a hard mutual dependency: everybody stops for
+   * whoever is furthest behind, so one machine in trouble stops the room. That
+   * is right for a moment — it is what keeps a rewind reachable — and wrong for
+   * ever, and the difference between the two is only time.
+   *
+   * Carrying on is safe, which is the part worth being clear about. It is not
+   * a divergence: the simulation goes on predicting that place exactly as
+   * before, and when their input does arrive it is a rewind like any other.
+   * The cost is more points spent on a guess. The alternative is a match that
+   * has stopped.
+   */
+  readonly patienceMs?: number
+  /**
    * Keep every input the match actually stepped with, for a replay file.
    *
    * Off by default, because it is the one thing here that grows with the
@@ -224,6 +239,8 @@ export class Rollback<State> {
    * closing with nothing on screen to say what had happened.
    */
   private readonly unheard = new Set<number>()
+  /** How long each place has been the reason this machine is stopped. */
+  private readonly waited: number[] = []
 
   /** Set while replaying a match somebody else already played. See `catchUp`. */
   private bulkLog: number[][] | null = null
@@ -254,6 +271,7 @@ export class Rollback<State> {
       this.used.push(new Map())
       this.lastValue.push(opts.idle)
       this.lastReal.push(-1)
+      this.waited.push(0)
     }
     this.sim.copy(this.prev, this.state)
   }
@@ -315,6 +333,11 @@ export class Rollback<State> {
       }
       const was = this.used[player]!.get(t)
       if (was !== undefined && was !== v && (earliest < 0 || t < earliest)) earliest = t
+    }
+    // They are back, so whatever was decided about their silence is over.
+    if (packed.length > 0) {
+      this.unheard.delete(player)
+      this.waited[player] = 0
     }
     if (earliest >= 0) this.rewindTo(earliest)
   }
@@ -588,25 +611,42 @@ export class Rollback<State> {
    * A place handed *back* is waited for again, which is right: somebody has
    * returned, and the nudge in `stepOnce` is what stops them being counted late
    * for the time they were away.
+  /**
+   * Which places are the reason this machine is stopped, and how far behind.
+   *
+   * The one thing worth knowing when a match has frozen, and it was being
+   * thrown away: "waiting for a peer" and "waiting for the third place, four
+   * hundred points behind" are the same fact and only one of them is any use.
    */
-  private shouldStall(): boolean {
+  waitingOn(): { p: number; behind: At }[] {
+    const out: { p: number; behind: At }[] = []
     for (let p = 0; p < this.opts.players; p++) {
-      if (this.opts.localPlayers.includes(p)) continue
-      if (this.unheard.has(p)) continue
-      if (this.autoFrom.get(p)?.on === true) continue
-      // A whole assignment says the same thing about everybody at once, and
-      // says it now. Somebody who has left a place stops speaking for it
-      // immediately; a client that has not yet played the point the assignment
-      // names goes on waiting for a place that will never speak again — and
-      // cannot reach that point, because it is waiting.
-      //
-      // That is a room where one person swaps benches and everybody stops. It
-      // spreads: whoever is stuck also stops sending, so whoever was waiting on
-      // *them* stops too, and it walks around the room until nobody is moving.
-      if (this.assignDriving !== null && !this.assignDriving.includes(p)) continue
-      if (!this.sim.holds(this.state, p)) continue
-      if (this.at - this.lastReal[p]! > this.opts.window) return true
+      if (this.waitingFor(p)) out.push({ p, behind: this.at - this.lastReal[p]! })
     }
+    return out
+  }
+
+  /**
+   * Whether this one place is holding everything up.
+   *
+   * Four ways it is not. It is ours. Its connection is gone, or we have waited
+   * long enough to stop expecting it. The room has already given it to
+   * something automatic — read the moment that is said rather than at the point
+   * it names, because reaching that point is exactly what waiting prevents. Or
+   * a whole assignment has taken it away, for the same reason.
+   */
+  private waitingFor(p: number): boolean {
+    if (this.opts.localPlayers.includes(p)) return false
+    if (this.unheard.has(p)) return false
+    if (this.autoFrom.get(p)?.on === true) return false
+    if (this.assignDriving !== null && !this.assignDriving.includes(p)) return false
+    if (!this.sim.holds(this.state, p)) return false
+    return this.at - this.lastReal[p]! > this.opts.window
+  }
+
+  /** True when we are too far ahead of a peer and must wait for them. */
+  private shouldStall(): boolean {
+    for (let p = 0; p < this.opts.players; p++) if (this.waitingFor(p)) return true
     return false
   }
 
@@ -618,6 +658,20 @@ export class Rollback<State> {
     this.acc += dtMs
     // A long stall — a tab in the background — must not trigger a replay storm.
     if (this.acc > this.opts.tickMs * 12) this.acc = this.opts.tickMs * 12
+
+    // Time how long each place has been the reason, and past the limit carry
+    // on without it. A room where one machine in trouble stops everybody is a
+    // room where anything going wrong anywhere stops the match — a join that
+    // does not take, most of all.
+    const patience = this.opts.patienceMs ?? 2000
+    for (let p = 0; p < this.opts.players; p++) {
+      if (!this.waitingFor(p)) {
+        this.waited[p] = 0
+        continue
+      }
+      this.waited[p]! += dtMs
+      if (this.waited[p]! >= patience) this.unheard.add(p)
+    }
 
     this.stalled = false
     while (this.acc >= this.opts.tickMs) {
