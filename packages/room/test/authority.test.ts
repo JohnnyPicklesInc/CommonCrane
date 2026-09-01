@@ -34,7 +34,9 @@ function toy(players: number): Sim<Toy> {
     hash: (s) => (s.sum * 31 + s.at) | 0,
     snapshot: (s) => [s.at, s.sum, ...s.pos],
     restore: (s, d) => {
-      if (d.length < 2) return false
+      // Exactly, the way a real one does: a world of the wrong shape is one
+      // from a different build, and filling in what fits is worse than saying no.
+      if (d.length !== s.pos.length + 2) return false
       s.at = d[0]!
       s.sum = d[1]!
       for (let i = 0; i < s.pos.length; i++) s.pos[i] = d[2 + i]!
@@ -174,5 +176,33 @@ describe('one machine simulating for everybody', () => {
     a.input(0, 1, [99])
     expect(a.hash()).not.toBe(before) // it did advance
     expect(a.state.pos[0]).toBe(0) // but nothing from the past landed
+  })
+
+  it('carries on from a world rather than starting again', () => {
+    // Taking over. Whoever was simulating has gone, and the match continues
+    // from where they left it — starting again from the beginning would put
+    // everybody back at the spawn with the score reset.
+    const a = authority(4)
+    for (let t = 0; t < 30; t++) {
+      a.input(0, a.at, [2])
+      a.advance(TICK)
+    }
+    const world = a.frame(99).data
+    const b = new Authority<Toy>({
+      sim: toy(4),
+      players: 4,
+      tickMs: TICK,
+      idle: 0,
+      from: world,
+    })
+    expect(b.at).toBe(a.at)
+    expect(b.frame(99).data).toEqual(world)
+  })
+
+  it('starts fresh rather than half filled in, given a world it cannot read', () => {
+    // Wrong in a way somebody can see, rather than a state part built from
+    // somebody else's build and diverging from the first point.
+    const b = new Authority<Toy>({ sim: toy(4), players: 4, tickMs: TICK, idle: 0, from: [1, 2] })
+    expect(b.at).toBe(0)
   })
 })

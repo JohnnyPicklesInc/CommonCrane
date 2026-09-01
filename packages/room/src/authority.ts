@@ -41,6 +41,16 @@ export interface AuthorityOptions<State> {
    * connection; there is no correctness in it either way.
    */
   readonly remember?: number
+  /**
+   * A world to carry on from, rather than a fresh one.
+   *
+   * For taking over: whoever was simulating has gone, and the match has to
+   * continue from where they left it rather than from the beginning. Refused
+   * if it is not a world this simulation recognises, which leaves a fresh one —
+   * wrong, but wrong in a way somebody can see, rather than a state half
+   * filled in from somebody else's build.
+   */
+  readonly from?: readonly number[]
 }
 
 /**
@@ -89,6 +99,7 @@ export class Authority<State> {
     this.write = write
     this.past = new Array<number[] | null>(opts.remember ?? 64).fill(null)
     this.state = this.sim.create()
+    if (opts.from !== undefined) opts.sim.restore?.(this.state, opts.from)
     for (let p = 0; p < opts.players; p++) {
       this.confirmed.push(-1)
       this.said.push(new Map())
