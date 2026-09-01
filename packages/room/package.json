@@ -8,6 +8,7 @@
     "./client": "./src/client.ts",
     "./rollback": "./src/rollback.ts",
     "./durable": "./src/durable.ts",
-    "./authority": "./src/authority.ts"
+    "./authority": "./src/authority.ts",
+    "./follower": "./src/follower.ts"
   }
 }
