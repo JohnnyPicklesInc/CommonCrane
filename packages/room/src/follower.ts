@@ -24,7 +24,7 @@
 
 import type { At } from './log.ts'
 import type { Sim } from './rollback.ts'
-import { receive, type Frame } from './authority.ts'
+import { apply, type Frame } from './authority.ts'
 
 export interface FollowerOptions<State> {
   readonly sim: Sim<State>
@@ -116,10 +116,23 @@ export class Follower<State> {
    * caller's to do because only it can speak to the authority.
    */
   take(frame: Frame, now: number): boolean {
-    if (!receive(this.world, frame, this.truth)) return false
+    // Against the world it was measured from, which is not the newest one held
+    // whenever anything is in flight — and something usually is. The buffer
+    // that exists for drawing is what makes the older world still available.
+    const base = frame.from === -1 ? null : this.worldOf(frame.from)
+    if (frame.from !== -1 && base === null) return false
+    const next = apply(base, frame)
+    if (next === null) return false
+    // Nothing older than what is already held. Sockets deliver in order, so
+    // this is a repeat rather than a rewind, and there is no rewinding here.
+    if (frame.at <= this.truth) return true
+    this.world = next
     this.truth = frame.at
-    this.seen.push({ at: frame.at, world: [...this.world], when: now })
-    const keep = this.opts.keep ?? 8
+    this.seen.push({ at: frame.at, world: next, when: now })
+    // Deep enough to still be holding whatever the authority last heard about,
+    // which is a round trip back — a shallower buffer refuses frames it could
+    // have applied and asks for whole worlds it did not need.
+    const keep = this.opts.keep ?? 32
     while (this.seen.length > keep) this.seen.shift()
     // Everything the authority has now accounted for is no longer ours to
     // re-apply. Kept until then, because until then it is the only record of
@@ -225,6 +238,14 @@ export class Follower<State> {
     const span = b.when - a.when
     const alpha = span <= 0 ? 0 : Math.min(1, Math.max(0, (target - a.when) / span))
     return { a: a.world, b: b.world, alpha }
+  }
+
+  /** A world this client is still holding, by point. */
+  private worldOf(at: At): number[] | null {
+    for (let i = this.seen.length - 1; i >= 0; i--) {
+      if (this.seen[i]!.at === at) return this.seen[i]!.world
+    }
+    return null
   }
 
   /** The newest world as numbers, for when there is nothing to blend. */

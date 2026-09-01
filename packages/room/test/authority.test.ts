@@ -4,7 +4,7 @@
 // rather than left guessing when it cannot.
 
 import { describe, it, expect } from 'vitest'
-import { Authority, receive, type Frame } from '../src/authority.ts'
+import { Authority, apply, type Frame } from '../src/authority.ts'
 import type { Sim } from '../src/rollback.ts'
 
 /** A state with a little of everything: something per player, and a total. */
@@ -62,9 +62,12 @@ function client() {
       return at
     },
     take(f: Frame): boolean {
-      const ok = receive(world, f, at)
-      if (ok) at = f.at
-      return ok
+      const next = apply(f.from === -1 ? null : f.from === at ? world : null, f)
+      if (next === null) return false
+      world.length = 0
+      for (const v of next) world.push(v)
+      at = f.at
+      return true
     },
   }
 }

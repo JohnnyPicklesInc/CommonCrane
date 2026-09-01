@@ -201,27 +201,26 @@ export class Authority<State> {
 }
 
 /**
- * Put a frame onto a world somebody already holds.
+ * Build the world a frame describes, from the one it was measured against.
  *
- * The other half of `Authority.frame`, and it lives here so that the two are
- * read together: a difference is only meaningful against exactly the world it
- * was measured from, and the pair of them is the whole of that agreement.
+ * `base` must be the world at `frame.from` and nothing else — not simply the
+ * newest one held. Those are different worlds whenever a frame is in flight,
+ * which is most of the time: the authority measures against what a player last
+ * *said* it held, and by the time that reaches it the player has moved on. A
+ * difference applied to the wrong world produces one nobody else has, which
+ * looks plausible and diverges in silence.
  *
- * Returns false when the frame cannot be applied — a difference against a
- * point this world is not at. The caller's answer to that is to ask for a
- * whole one, not to apply it anyway.
+ * Null when it cannot be built, which is the caller's cue to ask for a whole
+ * one rather than to carry on.
  */
-export function receive(world: number[], frame: Frame, at: At): boolean {
-  if (frame.from === -1) {
-    world.length = 0
-    for (const v of frame.data) world.push(v)
-    return true
-  }
-  if (frame.from !== at) return false
+export function apply(base: readonly number[] | null, frame: Frame): number[] | null {
+  if (frame.from === -1) return [...frame.data]
+  if (base === null) return null
+  const out = [...base]
   for (let i = 0; i + 1 < frame.data.length; i += 2) {
     const k = frame.data[i]!
-    if (k < 0 || k >= world.length) return false
-    world[k] = frame.data[i + 1]!
+    if (k < 0 || k >= out.length) return null
+    out[k] = frame.data[i + 1]!
   }
-  return true
+  return out
 }
