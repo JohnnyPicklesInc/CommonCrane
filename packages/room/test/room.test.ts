@@ -422,6 +422,65 @@ describe('a room that lost its memory', () => {
   })
 })
 
+describe('somebody who speaks without contributing', () => {
+  it('is not called quiet, though they never send an input', () => {
+    // The machine that simulates, on the netcode where only one does. It is
+    // the busiest thing in the room and sends no input at all — its own never
+    // leaves it. Judged on the input path alone the room takes its place away
+    // and gives it to the computer, with somebody sitting there driving it.
+    const { r, join, sit, deal } = room()
+    join('Alice'); join('Bob')
+    sit('Alice', [0]); sit('Bob', [1])
+    deal(r.begin('Alice', 2, 0))
+    // Bob contributes, so the match knows where it is. Alice never does.
+    r.input('Bob', 1, 0, [1], 0)
+
+    // Alice keeps saying she is there, by some other means.
+    let out = r.tick(SILENCE - 1)
+    r.heard('Alice', SILENCE - 1)
+    r.input('Bob', 1, 1, [1], SILENCE - 1)
+    r.heard('Alice', SILENCE * 2)
+    r.input('Bob', 1, 2, [1], SILENCE * 2)
+    out = r.tick(SILENCE * 2 + 1)
+    const handed = out.flatMap((d) => (d.kind === 'handovers' ? d.changes : []))
+    expect(handed.filter((h) => h.p === 0 && h.on)).toEqual([])
+  })
+
+  it('and is, the moment they stop', () => {
+    // The control: the same room, saying nothing at all.
+    const { r, join, sit, deal } = room()
+    join('Alice'); join('Bob')
+    sit('Alice', [0]); sit('Bob', [1])
+    deal(r.begin('Alice', 2, 0))
+    r.input('Bob', 1, 0, [1], 0)
+    const out = r.tick(SILENCE * 2)
+    const handed = out.flatMap((d) => (d.kind === 'handovers' ? d.changes : []))
+    expect(handed.some((h) => h.p === 0 && h.on)).toBe(true)
+  })
+
+  it('says nothing about where the match has got to', () => {
+    // A frame proves somebody is alive. It does not say which point the match
+    // is on — so a room that has lost its memory is no closer to knowing, and
+    // must still date nothing. Dating a decision from a guess about that is
+    // the failure `oriented` exists to prevent.
+    const { r, join, sit, deal, members } = room()
+    join('Alice'); join('Bob')
+    sit('Alice', [0]); sit('Bob', [1])
+    const begun = deal(r.begin('Alice', 2, 0))
+    const state = find(begun, 'remember')?.state
+
+    const woken = room()
+    woken.members.push(...members)
+    woken.r.restore(state!, true)
+    expect(woken.r.match.oriented).toBe(false)
+    woken.r.heard('Alice', 10)
+    expect(woken.r.match.oriented).toBe(false)
+    // And a contribution, which does say where it is, still does.
+    woken.r.input('Alice', 0, 40, [1], 20)
+    expect(woken.r.match.oriented).toBe(true)
+  })
+})
+
 describe('the listing', () => {
   it('is stamped from the moment it was given, not the wall clock', () => {
     // The one line in the room that read a clock of its own. It is the field

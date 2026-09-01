@@ -658,6 +658,34 @@ export class Room<Who, Settings, Seat> {
   }
 
   /**
+   * Somebody spoke on a path that carries no input.
+   *
+   * Every other measure of presence here comes off `input`, which is right for
+   * a game where every machine sends what it is doing. It is wrong for one
+   * where a single machine simulates and sends out what happened: that machine
+   * is the busiest thing in the room and, as far as the input path is
+   * concerned, has said nothing since the drop. Four seconds later the room
+   * takes its place away and hands it to the computer, while somebody sits
+   * there driving it.
+   *
+   * So a host relaying frames says so with this. Anything that shows a
+   * connection is alive will do — it does not have to be an input, and it is
+   * not treated as one: nothing is recorded and the match is not oriented by
+   * it.
+   */
+  heard(who: Who, now: number): Decision<Who, Settings, Seat>[] {
+    this.wake(now)
+    if (!this.running) return []
+    const mine = this.opts.members().find((m) => m.who === who)
+    if (mine === undefined) return []
+    for (const p of mine.players) this.match.heard(p, now)
+    // Somebody coming back is news, and waiting for the next beat to say so
+    // leaves them watching the computer play their place for another second.
+    const changes = this.match.observe(this.holders(), now)
+    return changes.length > 0 ? [{ kind: 'handovers', changes }] : []
+  }
+
+  /**
    * The clock. Everything else here is measured against whoever is furthest
    * along, which fails at the moment that player stops too — so a room that
    * has gone quiet needs somebody to look at it who is not in it.

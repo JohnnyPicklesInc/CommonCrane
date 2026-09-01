@@ -281,6 +281,25 @@ export class Match {
   }
 
   /**
+   * Somebody spoke, without saying anything about the timeline.
+   *
+   * The presence clock measures silence, not contributions — and on a netcode
+   * where one machine simulates and describes what happened, that machine
+   * never contributes at all: its own input never leaves it. Judged by the
+   * input path alone, the room decides the one player it cannot do without has
+   * gone quiet, and hands their place to something automatic while they are
+   * sitting there driving it.
+   *
+   * Deliberately does not orient the match. A frame says somebody is alive; it
+   * says nothing about where the match has got to, and dating a decision from
+   * a guess about that is the whole reason `oriented` exists.
+   */
+  heard(player: number, now: number): void {
+    if (!this.running) return
+    this.presence.hear(player, now)
+  }
+
+  /**
    * Look at the clock and hand back what changed.
    *
    * Call this both when traffic arrives and on a timer. Traffic alone is free
