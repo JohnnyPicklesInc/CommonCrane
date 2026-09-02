@@ -250,6 +250,18 @@ export class Room<Who, Settings, Seat> {
     return this.lobby.code
   }
 
+  /**
+   * Whether the room is offered to the public list.
+   *
+   * Alongside `build` and `code` because it is the same kind of fact: a term
+   * the room was opened on, which a caller has to be able to put into its own
+   * words. A game that tells an arrival what room they have walked into needs
+   * this, and working it out from a listing decision means asking for one.
+   */
+  get announced(): boolean {
+    return this.lobby.announced
+  }
+
   /** What the match was laid out as, or null if this room has forgotten it. */
   get seating(): Seating<Seat> | null {
     return this.laid
