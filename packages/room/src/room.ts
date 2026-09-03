@@ -645,6 +645,40 @@ export class Room<Who, Settings, Seat> {
    * last started has not been played yet, so a second press — or a tenth, from
    * ten people at once — does nothing until it has.
    */
+  /**
+   * Back to the lobby, with everybody still in the room.
+   *
+   * `rematch` is the same people on the same terms with a new seed, and that is
+   * the common case — but it cannot be the only one, because the settings are
+   * locked the moment a match is laid out. They have to be: they are folded
+   * into the state every client builds, so changing them under a running match
+   * is not a change of mind, it is two people playing different games.
+   *
+   * So changing them means ending the match first. This is that: the match is
+   * over, the room is a lobby again, and the host may propose and start afresh.
+   * What it deliberately does NOT touch is who is in the room, the code, the
+   * build or whether the room is public — none of which the match owned.
+   *
+   * Nobody is dealt a place by this. Everybody is back to waiting, which is
+   * what a lobby is, and the next `begin` deals them again.
+   */
+  reopen(now = Date.now()): Decision<Who, Settings, Seat>[] {
+    if (!this.running) return []
+    this.running = false
+    this.laid = null
+    this.match.end()
+    this.prints.clear()
+    this.lobby.lay(0)
+    return [
+      { kind: 'remember', state: this.lobby.snapshot(), started: false },
+      { kind: 'lobby', view: this.view() },
+      // A room that has gone back to waiting is joinable again, and the card
+      // says so: it was advertising a match in progress a moment ago.
+      this.listing(now),
+      { kind: 'wake', inMs: this.beat() },
+    ]
+  }
+
   rematch(now: number): Decision<Who, Settings, Seat>[] {
     if (!this.running || this.laid === null) return []
     if (this.match.head < 0) return []

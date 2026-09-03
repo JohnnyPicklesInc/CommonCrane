@@ -225,6 +225,68 @@ describe('the drop', () => {
   })
 })
 
+describe('reopening', () => {
+  it('puts a started room back to a lobby without emptying it', () => {
+    const { r, join, sit, deal } = room()
+    join('Alice'); join('Bob')
+    sit('Alice', [0]); sit('Bob', [1])
+    deal(r.begin('Alice', 2, 0))
+    expect(r.started).toBe(true)
+
+    const out = r.reopen(1000)
+    expect(r.started).toBe(false)
+    // Everybody is still here, and still shown as here.
+    expect(find(out, 'lobby')!.view.players.filter((n) => n !== null)).toEqual(['Alice', 'Bob'])
+    // And the room remembers it is no longer playing, for a host that is
+    // evicted between two messages.
+    expect(find(out, 'remember')!.started).toBe(false)
+  })
+
+  it('lets the host change the settings again, which is the whole point', () => {
+    // Settings are locked while a match is laid out, because they are folded
+    // into the state every client builds. Changing them therefore means ending
+    // the match first, and this is the only way to do that without throwing the
+    // room away and making everybody rejoin under a new code.
+    const { r, join, sit, deal } = room()
+    join('Alice'); join('Bob')
+    sit('Alice', [0]); sit('Bob', [1])
+    deal(r.begin('Alice', 2, 0))
+    expect(r.propose('Alice', { mode: 1 })).toEqual([])
+    expect(r.settings).toEqual({ mode: 0 })
+
+    r.reopen(1000)
+    expect(r.propose('Alice', { mode: 1 }).length).toBeGreaterThan(0)
+    expect(r.settings).toEqual({ mode: 1 })
+
+    // And it can be started again, on the new terms.
+    const out = deal(r.begin('Alice', 2, 2000))
+    expect(find(out, 'begun')!.seating.names).toEqual(['Alice', 'Bob'])
+    expect(r.started).toBe(true)
+  })
+
+  it('keeps the code, the build and the public listing', () => {
+    const { r, join, sit, deal } = room()
+    join('Alice', { announce: true }); join('Bob')
+    sit('Alice', [0]); sit('Bob', [1])
+    const code = r.code
+    const build = r.build
+    deal(r.begin('Alice', 2, 0))
+
+    const out = r.reopen(1000)
+    expect(r.code).toBe(code)
+    expect(r.build).toBe(build)
+    expect(r.announced).toBe(true)
+    // A room back to waiting is joinable again, and the card has to say so.
+    expect(find(out, 'listed')?.entry?.live).not.toBe(true)
+  })
+
+  it('does nothing to a room that was never started', () => {
+    const { r, join, sit } = room()
+    join('Alice'); sit('Alice', [0])
+    expect(r.reopen(0)).toEqual([])
+  })
+})
+
 describe('the clock', () => {
   it('retires somebody who has gone quiet, without an input to prompt it', () => {
     // The whole point of having one. Everything else is measured against
