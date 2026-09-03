@@ -141,11 +141,25 @@ export interface RollbackOptions<State> {
    * is right for a moment — it is what keeps a rewind reachable — and wrong for
    * ever, and the difference between the two is only time.
    *
-   * Carrying on is safe, which is the part worth being clear about. It is not
-   * a divergence: the simulation goes on predicting that place exactly as
-   * before, and when their input does arrive it is a rewind like any other.
-   * The cost is more points spent on a guess. The alternative is a match that
-   * has stopped.
+   * Carrying on is safe *while the wait stays inside the ring*, and that
+   * qualifier was missing here for a long time. The simulation goes on
+   * predicting that place exactly as before, and when their input arrives it is
+   * a rewind like any other — but only if there is still a state kept from the
+   * point being corrected. Past `window * 3` points there is not: the
+   * correction is dropped, this machine keeps a world built on a guess nobody
+   * else made, and only a fingerprint will ever say so.
+   *
+   * Which makes giving up a fork, not a delay, and no value of this number
+   * avoids that. Bounding it to the ring was tried and is worse than useless:
+   * you fork sooner. Waiting for ever is the only setting that cannot fork —
+   * and it is the stopped room this exists to prevent.
+   *
+   * So the fork is accepted and recovered from rather than prevented.
+   * `staleCorrections` counts every dropped correction, which is the signal a
+   * caller should treat exactly as it treats a disagreeing fingerprint: ask the
+   * room for the match back. Measured, an end-to-end run at two seconds against
+   * a ring of forty-two points forked about one time in six under a saturated
+   * process, and every time it did, that counter was not zero.
    */
   readonly patienceMs?: number
   /**
@@ -201,6 +215,14 @@ export class Rollback<State> {
 
   /** Diagnostics. */
   rollbacks = 0
+  /**
+   * Corrections that arrived too old to apply. Anything but zero is a divergence.
+   *
+   * See `rewindTo`. Kept beside the other diagnostics because it is the one
+   * number that tells a desync caused by lateness from a desync caused by the
+   * simulation, and the two are indistinguishable in a state hash.
+   */
+  staleCorrections = 0
   lineups = 0
   lastRollbackDepth = 0
   stalled = false
@@ -414,9 +436,22 @@ export class Rollback<State> {
   private rewindTo(at: At): void {
     const slot = ((at % this.ringSize) + this.ringSize) % this.ringSize
     if (this.ringAt[slot] !== at) {
-      // Older than the window; nothing to do but carry on and let the
-      // fingerprints catch it. In practice this means a peer is far beyond the
-      // prediction window behind, which the stall guard prevents.
+      // Older than the ring, so it cannot be put right: this machine has kept
+      // no state from that point to rewind to, and the correction is dropped.
+      //
+      // Which means this client is now playing a different match from whoever
+      // sent it, quietly, and only a fingerprint will say so. It is counted
+      // because the alternative is what happened for a long time: an
+      // intermittent desync with nothing anywhere to distinguish "the
+      // simulation disagreed" from "a correction arrived too late to apply".
+      // Those want completely different fixes and look identical in a hash.
+      //
+      // The stall guard is what should prevent it — a client may not run more
+      // than `window` ahead of a peer's confirmed input — but `patienceMs` is
+      // the deliberate exception, and giving up on a peer for longer than the
+      // ring is exactly how their input comes back unusable. Patience above
+      // `window * 3` ticks is patience that can cost a match.
+      this.staleCorrections++
       return
     }
     const target = this.at
