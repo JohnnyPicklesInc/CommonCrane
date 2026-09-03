@@ -41,8 +41,32 @@ export interface WsOptions {
    */
   readonly announce?: boolean
   readonly onOpen?: () => void
-  /** Where the rooms live. Only worth setting if yours are somewhere else. */
+  /**
+   * Where the rooms live. Only worth setting if yours are somewhere else.
+   *
+   * A path (`/api/rooms`) means this origin, which is the ordinary case: one
+   * Worker serves both the bundle and the rooms, so asking relatively is the
+   * honest thing to do.
+   *
+   * An absolute URL (`https://relay.example.com/api/rooms`) means somewhere
+   * else, which is what a build hosted by a portal needs — there
+   * `location.host` belongs to them, and a relative path would ask a games
+   * site for a game room.
+   */
   readonly base?: string
+}
+
+/**
+ * `ws(s)://host/path` for a base that may be either form.
+ *
+ * Absolute in, absolute out, with the scheme carried across — `https` becomes
+ * `wss`, so a portal build cannot be talked into an insecure socket from a
+ * secure page. Relative in, this origin out, exactly as before.
+ */
+function wsBase(base: string): string {
+  if (/^https?:\/\//.test(base)) return base.replace(/^http/, 'ws')
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws'
+  return `${proto}://${location.host}${base}`
 }
 
 export class WsTransport<Out, In> implements Transport<Out, In> {
@@ -51,13 +75,10 @@ export class WsTransport<Out, In> implements Transport<Out, In> {
   onClose: () => void = () => {}
 
   constructor(opts: WsOptions) {
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws'
     const base = opts.base ?? '/api/rooms'
     const q = new URLSearchParams({ name: opts.name, v: opts.build })
     if (opts.announce === true) q.set('pub', '1')
-    this.ws = new WebSocket(
-      `${proto}://${location.host}${base}/${encodeURIComponent(opts.code)}/ws?${q}`,
-    )
+    this.ws = new WebSocket(`${wsBase(base)}/${encodeURIComponent(opts.code)}/ws?${q}`)
     this.ws.onopen = () => opts.onOpen?.()
     this.ws.onmessage = (e) => {
       try {
@@ -118,7 +139,18 @@ export function roomFromUrl(): string | null {
   return h === null ? null : h[1]!.toUpperCase()
 }
 
-export function inviteUrl(code: string): string {
+/**
+ * A link that seats the person you send it to.
+ *
+ * `home` is for a build somebody else hosts. There the address bar belongs to
+ * the portal and the game is in an iframe several levels down, so a copy of
+ * this page's URL is a link to a page of games rather than to this room —
+ * point it at a deploy of ours instead, which serves the same bundle and reads
+ * `?room=` on arrival. Left out, the link is to where we already are, which is
+ * right everywhere else.
+ */
+export function inviteUrl(code: string, home?: string): string {
+  if (home !== undefined && home !== '') return `${home.replace(/\/+$/, '')}/?room=${code}`
   return `${location.origin}${location.pathname}?room=${code}`
 }
 
