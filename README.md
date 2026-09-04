@@ -67,3 +67,7 @@ Runs each game's `typecheck` and `test` against **this working copy**, standing
 it in for the version that game has pinned and putting the pinned one back
 afterwards. It answers "would releasing this break anybody", which their own
 suites can no longer answer for themselves now that they are pinned.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
