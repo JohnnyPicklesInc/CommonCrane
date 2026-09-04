@@ -14,7 +14,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { tarballName } from './lib/consumers.mjs'
+import { pkgName, tarballName } from './lib/consumers.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const manifestPath = join(root, 'packages/room/package.json')
@@ -137,5 +137,5 @@ sh('git', ['commit', '-m', `Release ${version}`])
 sh('git', ['tag', `v${version}`])
 
 console.log(`\nReleased ${version}.`)
-console.log(`\nA game takes it with:\n  "@cc/room": "file:../../../CommonCrane/${tarball}"`)
+console.log(`\nA game takes it with:\n  "${pkgName}": "file:../../../CommonCrane/${tarball}"`)
 console.log(`or, for every game at once:\n  npm run pin -- ${version}`)
