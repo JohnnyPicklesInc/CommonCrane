@@ -9,15 +9,16 @@ The library used to be a symlink into every game at once. It is now released,
 so a game holds still at the version it names until it asks for another.
 
 ```
-packages/room/          the working copy — always whatever comes next
+packages/room/src/      the working copy — always whatever comes next
+packages/room/dist/     built output, not committed
 releases/               the released versions, committed
-  cc-room-1.0.0.tgz
+  johnnypickles-room-2.0.0.tgz
 ```
 
 A game names one:
 
 ```json
-"@cc/room": "file:../../../CommonCrane/releases/cc-room-1.0.0.tgz"
+"@johnnypickles/room": "file:../../../CommonCrane/releases/johnnypickles-room-2.0.0.tgz"
 ```
 
 npm unpacks a tarball rather than linking it, so that game has its own copy and
@@ -39,8 +40,8 @@ check. Each release records how the games stood when it was cut, beside its
 tarball:
 
 ```
-releases/cc-room-1.0.0.tgz
-releases/cc-room-1.0.0.checks.json
+releases/johnnypickles-room-2.0.0.tgz
+releases/johnnypickles-room-2.0.0.tgz.checks.json
 ```
 
 The next release compares against that and stops only for a check that was
@@ -49,13 +50,14 @@ passing then and fails now. Everything else is reported and let through.
 ### Moving a game onto one
 
 ```
-npm run pin -- 1.1.0              # every game
-npm run pin -- 1.1.0 PuckPenguin  # only that one
-npm run pin -- 1.1.0 --dry-run    # say what would change
+npm run pin -- 2.1.0              # every game
+npm run pin -- 2.1.0 PuckPenguin  # only that one
+npm run pin -- 2.1.0 --dry-run    # say what would change
 ```
 
 Rewrites the manifests and installs. Games can sit on different versions; that
-is the point.
+is the point. It also moves a manifest off an older name, which is how the five
+games came across from `@cc/room`.
 
 ### Before you release
 
@@ -67,6 +69,21 @@ Runs each game's `typecheck` and `test` against **this working copy**, standing
 it in for the version that game has pinned and putting the pinned one back
 afterwards. It answers "would releasing this break anybody", which their own
 suites can no longer answer for themselves now that they are pinned.
+
+## Publishing
+
+The games install from `releases/`, which needs no registry and works offline.
+npm is for everybody else.
+
+```
+npm run build                 # dist/, JS + .d.ts
+npm publish --workspace=@johnnypickles/room --access public
+```
+
+The package ships `dist/` only — compiled JS with declarations, so it works
+under plain node and tsc rather than only inside a bundler. The sources import
+each other with `.ts` extensions and TypeScript rewrites those on the way out,
+so nothing in `src/` needs to know it is being published.
 
 ## License
 

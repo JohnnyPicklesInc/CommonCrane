@@ -8,7 +8,7 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
-import { findConsumers, root, workspace } from './lib/consumers.mjs'
+import { findConsumers, knownNames, pkgName, root, tarballName, workspace } from './lib/consumers.mjs'
 
 const args = process.argv.slice(2)
 const version = args.find((a) => !a.startsWith('--'))
@@ -20,7 +20,7 @@ if (!version) {
   process.exit(2)
 }
 
-const tarball = join(root, `releases/cc-room-${version}.tgz`)
+const tarball = join(root, 'releases', tarballName(version))
 if (!existsSync(tarball)) {
   console.error(`No release ${version}. Cut one with: npm run release -- <major|minor|patch|x.y.z>`)
   process.exit(1)
@@ -44,8 +44,17 @@ for (const { repo, name, manifests } of consumers) {
     let touchedHere = false
     for (const field of ['dependencies', 'devDependencies']) {
       const deps = manifest[field]
-      if (deps?.['@cc/room'] !== undefined && deps['@cc/room'] !== spec) {
-        deps['@cc/room'] = spec
+      if (!deps) continue
+      // A repo may still be on an old name, so move it across as well as up.
+      for (const old of knownNames.filter((n) => n !== pkgName)) {
+        if (deps[old] !== undefined) {
+          delete deps[old]
+          deps[pkgName] = spec
+          touchedHere = true
+        }
+      }
+      if (deps[pkgName] !== undefined && deps[pkgName] !== spec) {
+        deps[pkgName] = spec
         touchedHere = true
       }
     }

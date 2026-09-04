@@ -14,6 +14,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { tarballName } from './lib/consumers.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const manifestPath = join(root, 'packages/room/package.json')
@@ -52,7 +53,7 @@ function next(from, how) {
 }
 
 const version = next(current, bump)
-const tarball = `releases/cc-room-${version}.tgz`
+const tarball = `releases/${tarballName(version)}`
 
 if (existsSync(join(root, tarball))) {
   console.error(`${tarball} already exists. A released version is not rewritten.`)
@@ -75,13 +76,13 @@ function lastBaseline() {
   if (!existsSync(dir)) return null
   const files = readdirSync(dir).filter((f) => f.endsWith('.checks.json'))
   if (files.length === 0) return null
-  const versionOf = (f) => f.match(/cc-room-(.+)\.checks\.json$/)?.[1] ?? '0.0.0'
+  const versionOf = (f) => f.match(/-(\d+\.\d+\.\d+)\.tgz\.checks\.json$/)?.[1] ?? '0.0.0'
   const rank = (v) => v.split('.').map(Number).reduce((a, n) => a * 10000 + n, 0)
   const newest = files.sort((a, b) => rank(versionOf(a)) - rank(versionOf(b))).at(-1)
   return { version: versionOf(newest), checks: JSON.parse(readFileSync(join(dir, newest), 'utf8')) }
 }
 
-const checksPath = join(root, 'releases', `cc-room-${version}.checks.json`)
+const checksPath = join(root, 'releases', `${tarballName(version)}.checks.json`)
 mkdirSync(join(root, 'releases'), { recursive: true })
 
 if (!skipChecks) {
@@ -125,10 +126,12 @@ if (!skipChecks) {
 manifest.version = version
 writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
 
+// The tarball ships dist/, so build before packing or it ships the last build.
+sh('npm', ['run', 'build'], { stdio: 'inherit', encoding: undefined })
 sh('npm', ['pack', './packages/room', '--pack-destination', 'releases'], { stdio: 'inherit', encoding: undefined })
 
 const toCommit = ['packages/room/package.json', tarball]
-if (existsSync(checksPath)) toCommit.push(`releases/cc-room-${version}.checks.json`)
+if (existsSync(checksPath)) toCommit.push(`releases/${tarballName(version)}.checks.json`)
 sh('git', ['add', ...toCommit])
 sh('git', ['commit', '-m', `Release ${version}`])
 sh('git', ['tag', `v${version}`])

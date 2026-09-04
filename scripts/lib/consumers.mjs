@@ -12,6 +12,19 @@ export const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 export const workspace = resolve(root, '..')
 export const workingCopy = join(root, 'packages/room')
 
+/** The published name, taken from the package rather than repeated here. */
+export const pkgName = JSON.parse(readFileSync(join(workingCopy, 'package.json'), 'utf8')).name
+
+/**
+ * Names a manifest might still be using. The package was `@cc/room` until the
+ * `@cc` scope turned out to belong to somebody else on npm, and a repo that
+ * has not been moved across yet is still a consumer worth finding.
+ */
+export const knownNames = [pkgName, '@cc/room']
+
+/** What `npm pack` calls the tarball for a version: @scope/name → scope-name. */
+export const tarballName = (version) => `${pkgName.replace('@', '').replace('/', '-')}-${version}.tgz`
+
 /** Every package.json in a repo that could plausibly name us. */
 function manifestsIn(repo) {
   const found = [join(repo, 'package.json')]
@@ -27,7 +40,7 @@ function dependentManifests(repo) {
   return manifestsIn(repo).filter((m) => {
     try {
       const j = JSON.parse(readFileSync(m, 'utf8'))
-      return Object.keys({ ...j.dependencies, ...j.devDependencies }).some((k) => k.startsWith('@cc/'))
+      return Object.keys({ ...j.dependencies, ...j.devDependencies }).some((k) => knownNames.includes(k))
     } catch {
       return false // not ours to parse
     }
@@ -35,15 +48,17 @@ function dependentManifests(repo) {
 }
 
 /**
- * Wherever an installed copy of @cc/room ended up in a repo — hoisted to the
- * root in the usual case, but a workspace can keep its own, so look for both.
+ * Wherever an installed copy of the library ended up in a repo — hoisted to
+ * the root in the usual case, but a workspace can keep its own, so look for
+ * both, under any name the repo might still be using.
  */
 export function installedCopies(repo) {
-  const candidates = [join(repo, 'node_modules/@cc/room')]
+  const roots = [join(repo, 'node_modules')]
   const pkgs = join(repo, 'packages')
   if (existsSync(pkgs)) {
-    for (const d of readdirSync(pkgs)) candidates.push(join(pkgs, d, 'node_modules/@cc/room'))
+    for (const d of readdirSync(pkgs)) roots.push(join(pkgs, d, 'node_modules'))
   }
+  const candidates = roots.flatMap((r) => knownNames.map((n) => join(r, n)))
   return candidates.filter((c) => {
     try {
       lstatSync(c)

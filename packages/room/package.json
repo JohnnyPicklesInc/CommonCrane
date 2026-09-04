@@ -1,6 +1,5 @@
 {
-  "name": "@cc/room",
-  "private": true,
+  "name": "@johnnypickles/room",
   "version": "1.0.0",
   "license": "MIT",
   "description": "Matchmaking, presence and rollback netcode for small multiplayer games.",
@@ -13,14 +12,35 @@
   "bugs": "https://github.com/JohnnyPicklesInc/CommonCrane/issues",
   "type": "module",
   "files": [
-    "src"
+    "dist"
   ],
   "exports": {
-    ".": "./src/index.ts",
-    "./client": "./src/client.ts",
-    "./rollback": "./src/rollback.ts",
-    "./durable": "./src/durable.ts",
-    "./authority": "./src/authority.ts",
-    "./follower": "./src/follower.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "import": "./dist/client.js"
+    },
+    "./rollback": {
+      "types": "./dist/rollback.d.ts",
+      "import": "./dist/rollback.js"
+    },
+    "./durable": {
+      "types": "./dist/durable.d.ts",
+      "import": "./dist/durable.js"
+    },
+    "./authority": {
+      "types": "./dist/authority.d.ts",
+      "import": "./dist/authority.js"
+    },
+    "./follower": {
+      "types": "./dist/follower.d.ts",
+      "import": "./dist/follower.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
   }
 }

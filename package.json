@@ -12,7 +12,8 @@
     "test": "vitest run",
     "test:consumers": "node scripts/consumers.mjs",
     "release": "node scripts/release.mjs",
-    "pin": "node scripts/pin.mjs"
+    "pin": "node scripts/pin.mjs",
+    "build": "npm run build --workspace=@johnnypickles/room"
   },
   "devDependencies": {
     "typescript": "^5.9.0",
