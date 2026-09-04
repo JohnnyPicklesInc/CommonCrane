@@ -1,19 +1,22 @@
-// Who depends on us, and where they keep the copy they depend on.
+// Who depends on us, so `pin` can move them onto a version.
 //
-// Discovered rather than listed, by the same rule throughout: a repo beside
-// this one is a consumer if any manifest in it names an @cc/ package. A fifth
-// game is found the way the first four were, without being added to a list.
+// Discovered rather than listed: a repo beside this one is a consumer if any
+// manifest in it names this package. A sixth game is found the way the first
+// five were, without being added to a list.
+//
+// Nothing here judges a consumer. Whether a new version is good is a question
+// their own suite answers, in their own repo, on their own schedule.
 
-import { readdirSync, readFileSync, existsSync, lstatSync } from 'node:fs'
+import { readdirSync, readFileSync, existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 export const workspace = resolve(root, '..')
-export const workingCopy = join(root, 'packages/room')
+const pkgDir = join(root, 'packages/room')
 
 /** The published name, taken from the package rather than repeated here. */
-export const pkgName = JSON.parse(readFileSync(join(workingCopy, 'package.json'), 'utf8')).name
+export const pkgName = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8')).name
 
 /**
  * Names a manifest might still be using. The package was `@cc/room` until the
@@ -43,28 +46,6 @@ function dependentManifests(repo) {
       return Object.keys({ ...j.dependencies, ...j.devDependencies }).some((k) => knownNames.includes(k))
     } catch {
       return false // not ours to parse
-    }
-  })
-}
-
-/**
- * Wherever an installed copy of the library ended up in a repo — hoisted to
- * the root in the usual case, but a workspace can keep its own, so look for
- * both, under any name the repo might still be using.
- */
-export function installedCopies(repo) {
-  const roots = [join(repo, 'node_modules')]
-  const pkgs = join(repo, 'packages')
-  if (existsSync(pkgs)) {
-    for (const d of readdirSync(pkgs)) roots.push(join(pkgs, d, 'node_modules'))
-  }
-  const candidates = roots.flatMap((r) => knownNames.map((n) => join(r, n)))
-  return candidates.filter((c) => {
-    try {
-      lstatSync(c)
-      return true
-    } catch {
-      return false
     }
   })
 }

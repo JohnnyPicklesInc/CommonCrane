@@ -31,21 +31,12 @@ repo, as the symlink did.
 npm run release -- minor          # or major, patch, or an exact 1.2.3
 ```
 
-Refuses a dirty tree, runs every game's suite against this working copy first,
-then writes the tarball, commits and tags. `--skip-checks` if the release is
-meant to break somebody.
+Refuses a dirty tree, runs `typecheck` and `test`, builds, then writes the
+tarball, commits and tags. `--skip-checks` skips the suite.
 
-A game's suite is red for its own reasons, so the gate does not stop for a red
-check. Each release records how the games stood when it was cut, beside its
-tarball:
-
-```
-releases/johnnypickles-room-2.0.0.tgz
-releases/johnnypickles-room-2.0.0.tgz.checks.json
-```
-
-The next release compares against that and stops only for a check that was
-passing then and fails now. Everything else is reported and let through.
+It checks this library and nothing else. Whether a version suits a game is a
+question that game's own suite answers, in its own repo, when it chooses to
+take one.
 
 ### Moving a game onto one
 
@@ -55,20 +46,10 @@ npm run pin -- 2.1.0 PuckPenguin  # only that one
 npm run pin -- 2.1.0 --dry-run    # say what would change
 ```
 
-Rewrites the manifests and installs. Games can sit on different versions; that
-is the point. It also moves a manifest off an older name, which is how the five
-games came across from `@cc/room`.
-
-### Before you release
-
-```
-npm run test:consumers
-```
-
-Runs each game's `typecheck` and `test` against **this working copy**, standing
-it in for the version that game has pinned and putting the pinned one back
-afterwards. It answers "would releasing this break anybody", which their own
-suites can no longer answer for themselves now that they are pinned.
+Rewrites the manifests and installs — a convenience for making the change, not
+a judgement about whether it is a good one. Games can sit on different
+versions; that is the point. It also moves a manifest off an older name, which
+is how the five games came across from `@cc/room`.
 
 ## Publishing
 
