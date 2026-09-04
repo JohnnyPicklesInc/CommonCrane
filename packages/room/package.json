@@ -3,6 +3,14 @@
   "private": true,
   "version": "1.0.0",
   "license": "MIT",
+  "description": "Matchmaking, presence and rollback netcode for small multiplayer games.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JohnnyPicklesInc/CommonCrane.git",
+    "directory": "packages/room"
+  },
+  "homepage": "https://github.com/JohnnyPicklesInc/CommonCrane#readme",
+  "bugs": "https://github.com/JohnnyPicklesInc/CommonCrane/issues",
   "type": "module",
   "files": [
     "src"
