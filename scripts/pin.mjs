@@ -80,4 +80,4 @@ for (const { repo, name } of touched) {
   execFileSync('npm', ['install'], { cwd: repo, stdio: 'inherit' })
 }
 
-console.log(`\n${touched.length} repo(s) now on @cc/room ${version}.`)
+console.log(`\n${touched.length} repo(s) now on ${pkgName} ${version}.`)
