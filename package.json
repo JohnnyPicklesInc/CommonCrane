@@ -9,7 +9,9 @@
   "scripts": {
     "typecheck": "tsc -b --noEmit packages/room",
     "test": "vitest run",
-    "test:consumers": "node scripts/consumers.mjs"
+    "test:consumers": "node scripts/consumers.mjs",
+    "release": "node scripts/release.mjs",
+    "pin": "node scripts/pin.mjs"
   },
   "devDependencies": {
     "typescript": "^5.9.0",
