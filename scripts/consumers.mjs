@@ -11,9 +11,12 @@
 // first four were, which is having us in its dependencies.
 
 import { execFileSync } from 'node:child_process'
-import { readFileSync, renameSync, rmSync, symlinkSync, lstatSync, realpathSync } from 'node:fs'
+import { readFileSync, renameSync, rmSync, symlinkSync, lstatSync, realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { findConsumers, installedCopies, workingCopy } from './lib/consumers.mjs'
+
+const args = process.argv.slice(2)
+const jsonAt = args.includes('--json') ? args[args.indexOf('--json') + 1] : null
 
 const consumers = findConsumers()
 
@@ -93,6 +96,8 @@ for (const r of results) {
   const secs = `${(r.ms / 1000).toFixed(1)}s`.padStart(7)
   console.log(`${r.ok ? 'pass' : 'FAIL'}  ${`${r.name} · ${r.step}`.padEnd(36)}${secs}`)
 }
+if (jsonAt) writeFileSync(jsonAt, JSON.stringify(results, null, 2) + '\n')
+
 const failed = results.filter((r) => !r.ok)
 console.log('='.repeat(52))
 console.log(failed.length === 0 ? `${results.length} checks passed` : `${failed.length} of ${results.length} checks FAILED`)

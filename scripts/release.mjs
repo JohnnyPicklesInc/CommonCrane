@@ -11,7 +11,7 @@
 // on the machine that cut it is not a version anybody else can install.
 
 import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -61,13 +61,63 @@ if (existsSync(join(root, tarball))) {
 
 // The games are the only suite that would notice a break, so ask them before
 // the version exists rather than after it is in their manifests.
+//
+// But a game's suite is red for its own reasons — a bot test that times out
+// has nothing to say about the room — and a gate that stops for those is a
+// gate nobody leaves switched on. So each release records how the games stood
+// when it was cut, and the next one blocks only on a check that was passing
+// then and is failing now. Weather is reported; a regression stops the
+// release.
+
+/** How the games stood at the most recent release, if there has been one. */
+function lastBaseline() {
+  const dir = join(root, 'releases')
+  if (!existsSync(dir)) return null
+  const files = readdirSync(dir).filter((f) => f.endsWith('.checks.json'))
+  if (files.length === 0) return null
+  const versionOf = (f) => f.match(/cc-room-(.+)\.checks\.json$/)?.[1] ?? '0.0.0'
+  const rank = (v) => v.split('.').map(Number).reduce((a, n) => a * 10000 + n, 0)
+  const newest = files.sort((a, b) => rank(versionOf(a)) - rank(versionOf(b))).at(-1)
+  return { version: versionOf(newest), checks: JSON.parse(readFileSync(join(dir, newest), 'utf8')) }
+}
+
+const checksPath = join(root, 'releases', `cc-room-${version}.checks.json`)
+mkdirSync(join(root, 'releases'), { recursive: true })
+
 if (!skipChecks) {
   console.log(`Checking the consumers against this working copy before releasing ${version}…\n`)
   try {
-    sh('node', [join(root, 'scripts/consumers.mjs')], { stdio: 'inherit', encoding: undefined })
+    sh('node', [join(root, 'scripts/consumers.mjs'), '--json', checksPath], { stdio: 'inherit', encoding: undefined })
   } catch {
-    console.error('\nConsumers are failing against this working copy. Not releasing.')
+    // A red check is not by itself a reason to stop; the comparison below decides.
+  }
+
+  if (!existsSync(checksPath)) {
+    console.error('The consumer run produced no results. Not releasing.')
+    process.exit(1)
+  }
+
+  const results = JSON.parse(readFileSync(checksPath, 'utf8'))
+  const baseline = lastBaseline()
+  const failing = results.filter((r) => !r.ok)
+
+  const wasPassing = (r) =>
+    baseline?.checks.some((b) => b.name === r.name && b.step === r.step && b.ok) ?? false
+  const regressions = failing.filter(wasPassing)
+
+  if (failing.length > 0) {
+    console.log(
+      baseline
+        ? `\n${failing.length} check(s) red; ${failing.length - regressions.length} were already red at ${baseline.version}.`
+        : `\n${failing.length} check(s) red. No earlier release to compare against, so this run becomes the baseline.`,
+    )
+    for (const r of failing) console.log(`  ${wasPassing(r) ? 'REGRESSED' : 'already red'}  ${r.name} · ${r.step}`)
+  }
+
+  if (regressions.length > 0) {
+    console.error(`\nThese passed at ${baseline.version} and fail against this working copy. Not releasing.`)
     console.error('Fix them, or pass --skip-checks if this release is meant to break them.')
+    rmSync(checksPath, { force: true })
     process.exit(1)
   }
 }
@@ -77,7 +127,9 @@ writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
 
 sh('npm', ['pack', './packages/room', '--pack-destination', 'releases'], { stdio: 'inherit', encoding: undefined })
 
-sh('git', ['add', 'packages/room/package.json', tarball])
+const toCommit = ['packages/room/package.json', tarball]
+if (existsSync(checksPath)) toCommit.push(`releases/cc-room-${version}.checks.json`)
+sh('git', ['add', ...toCommit])
 sh('git', ['commit', '-m', `Release ${version}`])
 sh('git', ['tag', `v${version}`])
 

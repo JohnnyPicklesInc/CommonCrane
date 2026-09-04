@@ -34,6 +34,18 @@ Refuses a dirty tree, runs every game's suite against this working copy first,
 then writes the tarball, commits and tags. `--skip-checks` if the release is
 meant to break somebody.
 
+A game's suite is red for its own reasons, so the gate does not stop for a red
+check. Each release records how the games stood when it was cut, beside its
+tarball:
+
+```
+releases/cc-room-1.0.0.tgz
+releases/cc-room-1.0.0.checks.json
+```
+
+The next release compares against that and stops only for a check that was
+passing then and fails now. Everything else is reported and let through.
+
 ### Moving a game onto one
 
 ```
