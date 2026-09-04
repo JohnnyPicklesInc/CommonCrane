@@ -3,6 +3,16 @@
   "version": "2.0.0",
   "license": "MIT",
   "description": "Matchmaking, presence and rollback netcode for small multiplayer games.",
+  "keywords": [
+    "multiplayer",
+    "netcode",
+    "rollback",
+    "lobby",
+    "matchmaking",
+    "game",
+    "websocket",
+    "deterministic"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/JohnnyPicklesInc/CommonCrane.git",
