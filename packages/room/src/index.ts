@@ -38,6 +38,14 @@ export {
 } from './room.ts'
 export { sift, type Listed, type Offer, type SiftOptions } from './listing.ts'
 export {
+  gather,
+  filling,
+  startsIn,
+  type Held,
+  type GatherOptions,
+  type FillingOptions,
+} from './gathering.ts'
+export {
   Lobby,
   type LobbyOptions,
   type LobbyView,

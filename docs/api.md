@@ -58,6 +58,7 @@ other than a room.
 | `freeChairs`, `hostChair`, `roster`, `resizeChairs` | Questions about who is in the room. |
 | `sift` | What to show somebody looking for a room to join. The list is a cache of something the rooms own, never the truth. |
 | `makeCode` | A room code somebody can read aloud — no `O` or `0`, no `I` or `1`. |
+| `gather`, `filling`, `startsIn` | Putting strangers who have no room code into the same room, and deciding when it has waited long enough. Where the answer is kept — and what makes it single-threaded — is the host's. |
 
 ## `@johnnypickles/room/rollback`
 
