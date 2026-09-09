@@ -57,8 +57,22 @@ export interface Peers<Who, Held> {
    * path: six players at sixty a second is what this carries, and stringifying
    * the same message once per recipient is the one wasteful thing at that rate
    * that is easy to avoid. An implementation moves bytes and nothing else.
+   *
+   * `unreliable` is permission to drop this one rather than an instruction to.
+   * A host with one ordered stream — a WebSocket — ignores it and is right to;
+   * one with a choice sends it where a late copy is worse than no copy. Only the
+   * caller can say: an input echo carries a run of recent frames and heals
+   * itself, and everything else a room says is news that cannot be missed.
    */
-  send(who: Who, payload: string): void
+  send(who: Who, payload: string, unreliable?: boolean): void
+}
+
+/** How to send one message, when it is not simply "to everybody, reliably". */
+export interface Delivery<Who = never> {
+  /** Spare this one. Whoever the news is about rarely needs telling. */
+  readonly except?: Who
+  /** This one may be dropped — see `Peers.send`. */
+  readonly unreliable?: boolean
 }
 
 export interface HostOptions<Who, Settings, Seat, Held> {
@@ -125,22 +139,22 @@ export class Host<Who, Settings, Seat, Held> {
    * way. Throwing instead takes the whole message handler down, which loses the
    * other nine people's copy of whatever it was.
    */
-  sendTo(who: Who, msg: unknown): void {
+  sendTo(who: Who, msg: unknown, how: Delivery = {}): void {
     const payload = JSON.stringify(msg)
     try {
-      this.opts.peers.send(who, payload)
+      this.opts.peers.send(who, payload, how.unreliable)
     } catch {
       // Gone between selection and send.
     }
   }
 
   /** Send to everybody, optionally sparing one. Serialised once. */
-  broadcast(msg: unknown, except?: Who): void {
+  broadcast(msg: unknown, how: Delivery<Who> = {}): void {
     const payload = JSON.stringify(msg)
     for (const who of this.opts.peers.all()) {
-      if (except !== undefined && who === except) continue
+      if (how.except !== undefined && who === how.except) continue
       try {
-        this.opts.peers.send(who, payload)
+        this.opts.peers.send(who, payload, how.unreliable)
       } catch {
         // As above.
       }

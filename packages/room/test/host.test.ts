@@ -28,10 +28,10 @@ function peers(...names: string[]) {
     all: () => names,
     attachment: (who) => attachments.get(who) ?? null,
     attach: (who, held) => void attachments.set(who, held),
-    send: (who, payload) => {
+    send: (who, payload, unreliable) => {
       if (dead.has(who)) throw new Error('gone')
       const box = sent.get(who) ?? []
-      box.push(payload)
+      box.push(unreliable === true ? `~${payload}` : payload)
       sent.set(who, box)
     },
   }
@@ -82,9 +82,21 @@ describe('sending', () => {
   it('spares one when asked', () => {
     const said: Say[] = []
     const { h, of } = host(said)
-    h.broadcast({ t: 'x' }, 'a')
+    h.broadcast({ t: 'x' }, { except: 'a' })
     expect(of('a')).toEqual([])
     expect(of('b').length).toBe(1)
+  })
+
+  it('passes permission to drop through, for a host that has the choice', () => {
+    // An input echo heals itself — every message carries a run of recent frames
+    // — and a late copy of one is worse than none. Only the caller knows which
+    // messages those are, so it says, and a host with one ordered stream is free
+    // to ignore it.
+    const said: Say[] = []
+    const { h, of } = host(said)
+    h.broadcast({ t: 'in' }, { unreliable: true })
+    h.broadcast({ t: 'lobby' })
+    expect(of('a')).toEqual(['~{"t":"in"}', '{"t":"lobby"}'])
   })
 
   it('serialises a broadcast once', () => {
