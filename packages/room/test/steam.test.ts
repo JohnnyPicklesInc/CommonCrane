@@ -13,9 +13,15 @@ import {
   steamPeers,
   CONTROL,
   INPUT,
+  openLobby,
+  publish,
+  browse,
+  invitedTo,
   type Messages,
   type Received,
+  type Lobbies,
 } from '../src/steam.ts'
+import type { Listed } from '../src/listing.ts'
 import { Host } from '../src/host.ts'
 import { Room, type Member, type Decision } from '../src/room.ts'
 import { rollbackClock } from '../src/schedule.ts'
@@ -371,5 +377,229 @@ describe('a listen host, end to end', () => {
     expect(seen).toEqual(['lobby'])
     // Nothing went to Steam: the only member is the host itself.
     expect(f.sent).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+
+/** Steam's lobby half, as a Map and a call log. */
+function lobbies(seed: Record<string, Record<string, string>> = {}) {
+  const store = new Map<string, Record<string, string>>(Object.entries(seed))
+  const calls: string[] = []
+  const joinable = new Map<string, boolean>()
+  let breakList = false
+  let unreadable: string | null = null
+  let next = 100
+  const l: Lobbies = {
+    create: async (max) => {
+      const id = String(next++)
+      calls.push(`create(${max})->${id}`)
+      store.set(id, {})
+      return id
+    },
+    join: async (lobby) => void calls.push(`join(${lobby})`),
+    leave: async (lobby) => void calls.push(`leave(${lobby})`),
+    list: async () => {
+      if (breakList) throw new Error('steam is having a moment')
+      return [...store.keys()]
+    },
+    data: async (lobby) => {
+      if (lobby === unreadable) throw new Error('gone')
+      return store.get(lobby) ?? {}
+    },
+    setData: async (lobby, data) => {
+      calls.push(`setData(${lobby},${Object.keys(data).sort().join('+')})`)
+      store.set(lobby, { ...(store.get(lobby) ?? {}), ...data })
+    },
+    members: async () => [],
+    owner: async () => 'me',
+    joinable: async (lobby, on) => {
+      calls.push(`joinable(${lobby},${on})`)
+      joinable.set(lobby, on)
+    },
+    invite: async (lobby) => void calls.push(`invite(${lobby})`),
+  }
+  return {
+    l,
+    calls,
+    store,
+    joinable,
+    breakTheList: () => {
+      breakList = true
+    },
+    makeUnreadable: (id: string) => {
+      unreadable = id
+    },
+  }
+}
+
+/** What `publish` would have written for a room like this. */
+const room = (over: Partial<Listed> = {}): Listed => ({
+  code: 'ignored',
+  host: 'Alice',
+  players: 2,
+  max: 6,
+  since: 1000,
+  live: false,
+  build: 'v1',
+  updated: 0,
+  ...over,
+})
+
+describe('opening a room on Steam', () => {
+  it('stamps the build before anybody can find it', async () => {
+    // The order is the point. A lobby that is listed before it says what it
+    // plays is one other builds offer to their players for as long as it takes
+    // the next call to land — and every one of them is turned away at the door.
+    const f = lobbies()
+    const id = await openLobby(f.l, { build: 'v1', max: 6, announce: true })
+    expect(f.calls).toEqual([`create(6)->${id}`, `setData(${id},r.build)`, `joinable(${id},true)`])
+  })
+
+  it('is private unless asked otherwise', async () => {
+    // Being listed when you did not ask is worse than not being listed when you
+    // did, and the room says which it is through a `listed` decision anyway.
+    const f = lobbies()
+    const id = await openLobby(f.l, { build: 'v1', max: 6 })
+    expect(f.joinable.get(id)).toBe(false)
+  })
+})
+
+describe('answering a listed decision', () => {
+  it('writes the card and turns the browsing on together', async () => {
+    // A lobby left joinable with nothing in its data is a card with no writing
+    // on it.
+    const f = lobbies({ '7': {} })
+    await publish(f.l, '7', room({ players: 3, live: true }))
+    expect(f.joinable.get('7')).toBe(true)
+    expect(f.store.get('7')).toMatchObject({
+      'r.build': 'v1',
+      'r.host': 'Alice',
+      'r.players': '3',
+      'r.max': '6',
+      'r.since': '1000',
+      'r.live': '1',
+    })
+  })
+
+  it('takes the room off the list without turning anybody out of it', async () => {
+    // Coming off the board is not leaving the lobby: the people in it are still
+    // playing and an invited friend can still be let in. Only browsing stops.
+    const f = lobbies({ '7': {} })
+    await publish(f.l, '7', null)
+    expect(f.joinable.get('7')).toBe(false)
+    expect(f.calls.some((c) => c.startsWith('leave'))).toBe(false)
+  })
+
+  it('writes nothing for an `about` the game did not set', async () => {
+    // An empty key is still a key, and a reader cannot tell "said nothing" from
+    // "said undefined".
+    const f = lobbies({ '7': {} })
+    await publish(f.l, '7', room())
+    expect('r.about' in f.store.get('7')!).toBe(false)
+  })
+})
+
+describe('browsing for a room', () => {
+  it('offers only rooms on this exact build', async () => {
+    // Not politeness: a room seats only clients running its own bundle, so an
+    // entry on another build is a dead link that looks like a game. On Steam
+    // that is a stale depot, which is likelier than a stale tab — Steam updates
+    // in the background and a running game does not.
+    const f = lobbies()
+    await publish(f.l, await openLobby(f.l, { build: 'v1', max: 6 }), room())
+    await publish(f.l, await openLobby(f.l, { build: 'v2', max: 6 }), room({ build: 'v2' }))
+    const offers = await browse(f.l, { build: 'v1', now: 5000 })
+    expect(offers.length).toBe(1)
+  })
+
+  it('hands back something directly joinable', async () => {
+    // The lobby id doubles as the code, so a click on an offer is a join rather
+    // than a lookup that turns a code into a lobby.
+    const f = lobbies()
+    const id = await openLobby(f.l, { build: 'v1', max: 6 })
+    await publish(f.l, id, room())
+    const [offer] = await browse(f.l, { build: 'v1', now: 5000 })
+    expect(offer?.code).toBe(id)
+    await f.l.join(offer!.code)
+    expect(f.calls).toContain(`join(${id})`)
+  })
+
+  it('skips a lobby that has not said what it is', async () => {
+    // Either something else entirely, or one caught between being created and
+    // being stamped. Neither is joinable and guessing gains nothing.
+    const f = lobbies({ '900': {}, '901': { unrelated: 'yes' } })
+    expect(await browse(f.l, { build: 'v1', now: 5000 })).toEqual([])
+  })
+
+  it('shows the newest room first', async () => {
+    const f = lobbies()
+    const old = await openLobby(f.l, { build: 'v1', max: 6 })
+    await publish(f.l, old, room({ since: 100, host: 'Old' }))
+    const recent = await openLobby(f.l, { build: 'v1', max: 6 })
+    await publish(f.l, recent, room({ since: 900, host: 'New' }))
+    const offers = await browse(f.l, { build: 'v1', now: 5000 })
+    expect(offers.map((o) => o.host)).toEqual(['New', 'Old'])
+  })
+
+  it('carries whatever the game put on the card', async () => {
+    const f = lobbies()
+    const id = await openLobby(f.l, { build: 'v1', max: 6 })
+    await publish(f.l, id, room({ about: { arena: 'pond', matchup: [3, 7] } }))
+    const [offer] = await browse(f.l, { build: 'v1', now: 5000 })
+    expect(offer?.about).toEqual({ arena: 'pond', matchup: [3, 7] })
+  })
+
+  it('reads as no games rather than as an error when Steam will not answer', async () => {
+    // Polled on a timer behind a menu somebody is looking at. A blip should not
+    // stack an error over the buttons every few seconds.
+    const f = lobbies()
+    f.breakTheList()
+    expect(await browse(f.l, { build: 'v1', now: 5000 })).toEqual([])
+  })
+
+  it('does not lose the whole list to one unreadable lobby', async () => {
+    const f = lobbies()
+    const good = await openLobby(f.l, { build: 'v1', max: 6 })
+    await publish(f.l, good, room())
+    const bad = await openLobby(f.l, { build: 'v1', max: 6 })
+    await publish(f.l, bad, room())
+    f.makeUnreadable(bad)
+    const offers = await browse(f.l, { build: 'v1', now: 5000 })
+    expect(offers.map((o) => o.code)).toEqual([good])
+  })
+
+  it('survives a card with junk written on it', async () => {
+    // Written by a build that words it differently, which is exactly the case
+    // the build filter exists for — but it has to be read before it can be
+    // filtered.
+    const f = lobbies({
+      '900': { 'r.build': 'v1', 'r.players': 'lots', 'r.since': 'yesterday', 'r.about': '{oh dear' },
+    })
+    const [offer] = await browse(f.l, { build: 'v1', now: 5000 })
+    expect(offer?.players).toBe(0)
+    expect(offer?.since).toBe(5000)
+    expect(offer?.about).toBeUndefined()
+  })
+})
+
+describe('an invite accepted before the game was running', () => {
+  it('reads the lobby off the command line', () => {
+    expect(invitedTo(['game.exe', '+connect_lobby', '109775241004797650'])).toBe(
+      '109775241004797650',
+    )
+  })
+
+  it('is nothing when there was no invite', () => {
+    expect(invitedTo(['game.exe'])).toBeNull()
+    expect(invitedTo(['game.exe', '+connect_lobby'])).toBeNull()
+  })
+
+  it('takes digits and nothing else', () => {
+    // Somebody else's text arriving on a command line, and everything downstream
+    // treats it as an identity.
+    expect(invitedTo(['game.exe', '+connect_lobby', '../../etc/passwd'])).toBeNull()
+    expect(invitedTo(['game.exe', '+connect_lobby', '12; rm -rf /'])).toBeNull()
+    expect(invitedTo(['game.exe', '+connect_lobby', ''])).toBeNull()
   })
 })

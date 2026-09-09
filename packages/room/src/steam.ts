@@ -20,6 +20,7 @@
 
 import type { Peers } from './host.ts'
 import type { Transport } from './client.ts'
+import { sift, type Listed, type Offer } from './listing.ts'
 
 // Re-exported so a game on Steam needs one entry point rather than two. The type
 // is erased, so this costs nothing and drags no browser globals in behind it.
@@ -365,4 +366,251 @@ export function steamPeers<Held>(opts: SteamPeersOptions): {
       opts.steam.close(who)
     },
   }
+}
+
+// ---------------------------------------------------------------------------
+// Finding a room, and being found.
+//
+// `client.ts` does this against your own HTTP endpoints: mint a code, ask a
+// directory what is public, read an invite out of the address bar. Steam already
+// has all three, so this is the same four jobs against Valve's versions of them.
+//
+// One difference is worth stating because it removes machinery rather than adding
+// it. A directory of our own is a *cache* of something the rooms own: a room that
+// crashes leaves an entry nobody can retract, which is why `Listed` carries the
+// time it was last confirmed and why `sift` throws away anything stale. Steam's
+// lobby list is not a cache. Valve removes a lobby when its owner goes, so
+// nothing here can be stale and the whole staleness half of `sift` is inert.
+//
+// What is emphatically not inert is the build filter. A room seats only clients
+// running its own bundle — `Room` refuses the rest at the door — so a lobby on
+// another build is not a game somebody can join, it is a dead link that looks
+// like one. On Steam that means a stale depot rather than a stale tab, which is
+// if anything more likely: Steam updates in the background and a running game
+// does not.
+
+/**
+ * A Steam lobby's id, as decimal digits.
+ *
+ * The same shape as an `Id` and a different thing, so it is named separately.
+ * Both are u64 and both are too large to be a JavaScript number — see `Id`.
+ *
+ * On Steam this is also the room's *code*. A four-character code exists so it
+ * can be read aloud down a telephone, and Steam invites are a button in the
+ * overlay rather than something anybody types — so `makeCode` has no job here,
+ * and using the lobby id means an offer somebody clicks in a list is directly
+ * joinable instead of needing a second lookup to turn a code into a lobby.
+ */
+export type LobbyId = string
+
+/**
+ * The lobby half of Steam, as this needs to see it.
+ *
+ * Asynchronous throughout, unlike `Messages`. Nothing here is on a hot path —
+ * it is menus, and once at the start of a match — so there is no reason to make
+ * a host pretend a request to another process is instant. `Messages` is sync
+ * because inbound frames can be queued locally and drained; a lobby list cannot.
+ */
+export interface Lobbies {
+  /** Open one, and get its id. On Steam this is the room coming into existence. */
+  create(max: number): Promise<LobbyId>
+  join(lobby: LobbyId): Promise<void>
+  leave(lobby: LobbyId): Promise<void>
+  /**
+   * Every lobby for this app that is currently joinable.
+   *
+   * No filter, because Steam's own list call takes none: what a lobby is *for*
+   * is in its data, and that has to be read before it can be judged. So the
+   * filtering happens here, on the way out — see `browse`.
+   */
+  list(): Promise<readonly LobbyId[]>
+  data(lobby: LobbyId): Promise<Record<string, string>>
+  setData(lobby: LobbyId, data: Record<string, string>): Promise<void>
+  members(lobby: LobbyId): Promise<readonly Id[]>
+  owner(lobby: LobbyId): Promise<Id>
+  /** Whether Steam offers this lobby to anybody else. */
+  joinable(lobby: LobbyId, on: boolean): Promise<void>
+  /** Steam's invite overlay, in place of a link to copy. */
+  invite(lobby: LobbyId): Promise<void>
+}
+
+/**
+ * The keys a room's listing is written under.
+ *
+ * One definition, used by whoever writes and whoever reads, because the failure
+ * mode of two is silent: a writer and a reader that disagree about a key produce
+ * a lobby that lists as somebody else's build, or with no host name, and the
+ * room looks empty rather than broken.
+ *
+ * Prefixed, because lobby data is a single flat namespace shared with anything
+ * else a game keeps in there.
+ */
+const KEY = {
+  build: 'r.build',
+  host: 'r.host',
+  players: 'r.players',
+  max: 'r.max',
+  since: 'r.since',
+  live: 'r.live',
+  about: 'r.about',
+} as const
+
+/**
+ * Open a room on Steam.
+ *
+ * The counterpart of `createRoom`, and it does one thing more: it stamps the
+ * build in before the lobby is joinable. A lobby that is listed before it says
+ * what it plays is one that other builds will offer to their players for as long
+ * as it takes the second call to land, and every one of them is turned away at
+ * the door.
+ *
+ * `max` is chairs, so it is the room's capacity rather than its roster.
+ */
+export async function openLobby(
+  lobbies: Lobbies,
+  opts: { readonly build: string; readonly max: number; readonly announce?: boolean },
+): Promise<LobbyId> {
+  const lobby = await lobbies.create(opts.max)
+  await lobbies.setData(lobby, { [KEY.build]: opts.build })
+  // Not joinable until somebody says so. A private room is the safer default:
+  // being listed when you did not ask is worse than not being listed when you
+  // did, and the room says which it is through a `listed` decision anyway.
+  await lobbies.joinable(lobby, opts.announce === true)
+  return lobby
+}
+
+/**
+ * Answer a `listed` decision on Steam.
+ *
+ * Give this to `Host` as its `list`. A room decides whether it belongs on the
+ * public board and under what terms; on Steam that is lobby data plus whether
+ * Valve offers the lobby to anybody, and the two move together — a lobby left
+ * joinable with nothing in its data is a card with no writing on it.
+ *
+ * `null` is the room asking to come off the list, which is a different thing
+ * from leaving the lobby: the people in it are still playing, and an invited
+ * friend can still be let in. Only the browsing is switched off.
+ */
+export async function publish(
+  lobbies: Lobbies,
+  lobby: LobbyId,
+  entry: Listed | null,
+): Promise<void> {
+  if (entry === null) {
+    await lobbies.joinable(lobby, false)
+    return
+  }
+  const data: Record<string, string> = {
+    [KEY.build]: entry.build,
+    [KEY.host]: entry.host,
+    [KEY.players]: String(entry.players),
+    [KEY.max]: String(entry.max),
+    [KEY.since]: String(entry.since),
+    [KEY.live]: entry.live === true ? '1' : '0',
+  }
+  // Only if there is one: an empty key is still a key, and a reader cannot tell
+  // "the game said nothing" from "the game said undefined".
+  if (entry.about !== undefined) data[KEY.about] = JSON.stringify(entry.about)
+  await lobbies.setData(lobby, data)
+  await lobbies.joinable(lobby, true)
+}
+
+/** A lobby's data as a `Listed`, or null if it is not one of our rooms at all. */
+function listedOf(lobby: LobbyId, data: Record<string, string>, now: number): Listed | null {
+  const build = data[KEY.build]
+  // No build means either a lobby belonging to something else entirely, or one
+  // caught between being created and being stamped. Neither is joinable, and
+  // guessing at the difference gains nothing.
+  if (build === undefined || build === '') return null
+  const num = (raw: string | undefined, fallback: number): number => {
+    const n = Number(raw)
+    return Number.isFinite(n) ? n : fallback
+  }
+  let about: unknown
+  if (data[KEY.about] !== undefined) {
+    try {
+      about = JSON.parse(data[KEY.about])
+    } catch {
+      // Written by a build that words it differently. The card is still worth
+      // showing without whatever this was.
+    }
+  }
+  return {
+    // The lobby id doubles as the code — see `LobbyId`.
+    code: lobby,
+    host: data[KEY.host] ?? '?',
+    players: num(data[KEY.players], 0),
+    max: num(data[KEY.max], 0),
+    since: num(data[KEY.since], now),
+    live: data[KEY.live] === '1',
+    about,
+    build,
+    // Valve removes a lobby when its owner goes, so anything on the list is
+    // confirmed by the fact of being on it. See the note at the top.
+    updated: now,
+  }
+}
+
+/**
+ * Rooms waiting for people, on this exact build.
+ *
+ * The counterpart of `listRooms`, and it hands back the same `Offer[]` — so a
+ * game's existing menu goes on working, which is the whole reason this returns
+ * somebody else's shape rather than a Steam-flavoured one.
+ *
+ * Every lobby's data is read, because Steam's list call cannot filter on it.
+ * Concurrently, since each is a separate request and a menu is waiting.
+ *
+ * Returns nothing rather than throwing when the list cannot be had. This is
+ * polled on a timer behind a menu somebody is looking at, and a blip should read
+ * as "no games right now" rather than stacking an error over the buttons every
+ * few seconds — the same judgement `listRooms` makes.
+ */
+export async function browse(
+  lobbies: Lobbies,
+  opts: { readonly build: string; readonly now: number },
+): Promise<Offer[]> {
+  let ids: readonly LobbyId[]
+  try {
+    ids = await lobbies.list()
+  } catch {
+    return []
+  }
+  const found = await Promise.all(
+    ids.map(async (id) => {
+      try {
+        return listedOf(id, await lobbies.data(id), opts.now)
+      } catch {
+        // One unreadable lobby is not a reason to show an empty list.
+        return null
+      }
+    }),
+  )
+  const entries: [string, Listed][] = []
+  for (const e of found) if (e !== null) entries.push([e.code, e])
+  // `sift` for the build filter, the projection and the order, so there is one
+  // definition of what a browsing player sees. Its staleness half cannot fire
+  // here: every entry was stamped `now` a moment ago, because Steam's list is
+  // the truth rather than a cache of it.
+  return sift(entries, { build: opts.build, now: opts.now, staleMs: 1 }).offers
+}
+
+/**
+ * The lobby somebody was invited into, from how the game was launched.
+ *
+ * The counterpart of `roomFromUrl`. Steam starts the game with `+connect_lobby
+ * <id>` when an invite is accepted while the game is closed; accepted while it
+ * is already running, the same thing arrives as a callback instead, which is the
+ * host's to listen for and to hand to `join`.
+ *
+ * Read from arguments rather than from the SDK because Steam's own
+ * `GetLaunchCommandLine` is not bound in the binding this was written against —
+ * and the arguments are where Steam put it either way.
+ */
+export function invitedTo(argv: readonly string[]): LobbyId | null {
+  const at = argv.indexOf('+connect_lobby')
+  const raw = at < 0 ? undefined : argv[at + 1]
+  // Digits only. This is somebody else's text arriving on a command line, and
+  // everything downstream of it treats it as an identity.
+  return raw !== undefined && /^[0-9]{1,20}$/.test(raw) ? raw : null
 }

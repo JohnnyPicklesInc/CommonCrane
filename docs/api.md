@@ -176,3 +176,36 @@ a browser bundle that will never call it.
 **Exactly one thing in a process may drain a channel.** Two drainers steal from
 each other silently, and what goes missing is half of everybody's input. On a
 joiner that is the transport; on a host it is the peer pump.
+
+Finding a room, and being found — the same four jobs `client` does against your
+own HTTP endpoints, against Valve's versions of them:
+
+- `Lobbies` — the lobby half, and a separate interface from `Messages` because a
+  transport has no business knowing how a room was found. Asynchronous
+  throughout: none of it is on a hot path, so there is no reason to pretend a
+  request to another process is instant.
+- `LobbyId` — also the room's *code* on Steam. A four-character code exists to
+  be read aloud, and a Steam invite is a button in the overlay, so `makeCode`
+  has no job here — and an offer somebody clicks is directly joinable rather
+  than needing a lookup.
+- `openLobby(lobbies, {build, max, announce?})` — the counterpart of
+  `createRoom`, and it stamps the build *before* the lobby is joinable. Listed
+  first, other builds offer it to their players for as long as the next call
+  takes, and every one of them is turned away at the door.
+- `publish(lobbies, lobby, entry)` — give this to `Host` as its `list`. Answers a
+  `listed` decision: the card and whether Valve offers the lobby move together.
+  `null` comes off the board without turning anybody out of the lobby.
+- `browse(lobbies, {build, now})` — the counterpart of `listRooms`, returning the
+  same `Offer[]` so an existing menu goes on working. Every lobby's data is read
+  concurrently, because Steam's list call cannot filter on it. Empty rather than
+  throwing when the list cannot be had.
+- `invitedTo(argv)` — the counterpart of `roomFromUrl`, reading
+  `+connect_lobby <id>`. Digits only: it is somebody else's text on a command
+  line. Accepted while the game is already running, the same thing arrives as an
+  SDK callback instead, which is the host's to listen for.
+
+Steam's lobby list is the truth rather than a cache of it — Valve removes a lobby
+when its owner goes — so the staleness half of `sift` is inert here. The build
+filter is not: on Steam a wrong build means a stale depot rather than a stale tab,
+which is likelier, because Steam updates in the background and a running game does
+not.
