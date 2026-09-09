@@ -144,3 +144,35 @@ was.
 - `heartbeat(look)` — `beat` over plain timers, for a host that stays in
   memory. Brings a pending wake forward when asked for sooner and leaves one
   already sooner alone.
+
+## `@johnnypickles/room/steam`
+
+`client` for a game whose room lives inside one of the players. Imports no SDK
+and cannot: `Messages` is four operations, supplied by whatever process actually
+holds the Steam API — so this tests at full speed against a fake and is safe in
+a browser bundle that will never call it.
+
+- `Messages` — `me`, `send`, `drain`, `accept`, `close`. Deliberately not the
+  lobby half; a transport has no business knowing how a room was found.
+- `Id` — a Steam identity as decimal digits. A string because every steamID64
+  is larger than `Number.MAX_SAFE_INTEGER`, so one carried as a number is
+  silently the wrong person.
+- `CONTROL` / `INPUT` — the careful channel and the hot one. Say which of your
+  messages are droppable with `unreliable`; left out, everything is reliable,
+  which is the answer that is merely slow rather than wrong.
+- `SteamTransport` — the client end, one peer, implementing `Transport`.
+  `pump()` is yours to call: receive is a poll, your game already has a loop at
+  that rate, and how often you call it *is* the inbound latency. `onRefused`
+  hears about a message Steam would not take, which is how this fails — by
+  size, on a catchup.
+- `loopback()` — the two ends of a room and a client in one process, so a listen
+  host plays through a transport like everybody else. Delivery is deferred, and
+  that is the substance of it: a room part-way through a list of decisions is
+  not re-entrant.
+- `steamPeers()` — `Peers` for `Host` over Steam identities, plus the pump that
+  feeds it. Give it `self` and the host's own copy goes down the loopback
+  instead of asking Valve to deliver a message to this machine.
+
+**Exactly one thing in a process may drain a channel.** Two drainers steal from
+each other silently, and what goes missing is half of everybody's input. On a
+joiner that is the transport; on a host it is the peer pump.

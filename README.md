@@ -114,6 +114,7 @@ a browser in behind it.
 | `@johnnypickles/room/client` | Browser side — a WebSocket transport, invite URLs, update watching. |
 | `@johnnypickles/room/host` | The part of a host that is the same on every host: what a connection holds, sending to one or all, the heartbeat, and the four decisions that are about hosting rather than about the game. |
 | `@johnnypickles/room/durable` | Glue for a Cloudflare Durable Object. Writing another host is about thirty lines against `host`. |
+| `@johnnypickles/room/steam` | Reaching a room over Steam, for a game whose host is one of the players. A transport, a loopback pair so the host is not a special case, and the connections for a room that lives in a process rather than on a server. |
 
 See [docs/api.md](docs/api.md) for what each one exports.
 

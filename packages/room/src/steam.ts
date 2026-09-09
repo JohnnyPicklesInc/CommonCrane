@@ -290,6 +290,22 @@ export interface SteamPeersOptions {
    * answer to who is present and is therefore the one worth believing.
    */
   readonly members: () => readonly Id[]
+  /**
+   * This machine's own client, which is not on the wire.
+   *
+   * A listen host is a player as well as a room, so it appears in its own member
+   * list — and a broadcast that reached for Steam to talk to itself would be
+   * asking Valve to deliver a message to the machine it is running on. Given an
+   * end here, its own copy goes down that instead.
+   *
+   * Left out for a host that is only a room and not also a player, which is what
+   * a dedicated one is.
+   */
+  readonly self?: {
+    readonly id: Id
+    /** Hand it to the client at the other end of a `loopback` pair. */
+    readonly send: (payload: string) => void
+  }
   readonly batch?: number
 }
 
@@ -321,6 +337,12 @@ export function steamPeers<Held>(opts: SteamPeersOptions): {
         attachments.set(who, held)
       },
       send: (who, payload, unreliable) => {
+        // Our own client first: it is a member like any other and must not be
+        // sent to over the network — see `self`.
+        if (opts.self !== undefined && who === opts.self.id) {
+          opts.self.send(payload)
+          return
+        }
         // Where the two channels are actually chosen between. Everything a room
         // says is news that cannot be missed; the exception is the input echo a
         // game relays on the hot path, which heals itself and asks to be

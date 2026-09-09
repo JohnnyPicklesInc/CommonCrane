@@ -45,6 +45,10 @@
       "types": "./dist/host.d.ts",
       "import": "./dist/host.js"
     },
+    "./steam": {
+      "types": "./dist/steam.d.ts",
+      "import": "./dist/steam.js"
+    },
     "./authority": {
       "types": "./dist/authority.d.ts",
       "import": "./dist/authority.js"
