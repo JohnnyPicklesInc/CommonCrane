@@ -274,6 +274,75 @@ export class Room<Who, Settings, Seat> {
   }
 
   /**
+   * Become the room, on a machine that was only ever a client of it.
+   *
+   * What migration is. A peer-hosted match has the room inside somebody's
+   * process, so when that somebody quits the room goes with them — and every
+   * survivor is holding the material to rebuild it, because a client of a
+   * rollback match has been receiving every player's input all along. This is
+   * the door that material comes back in through.
+   *
+   * Both halves in one call, deliberately. The lobby state and the match are
+   * separately restorable and were separately restorable before this existed;
+   * the reason not to leave it at that is the argument at the top of this file.
+   * Every bug that has actually happened here was in the composition — the five
+   * of seven things a rematch cleared, the listing taken down after the storage
+   * was wiped instead of before. A caller holding two calls and an order between
+   * them is a caller with a fourth one of those waiting to happen.
+   *
+   * Validated before anything is touched, so a payload that does not describe a
+   * match leaves the room exactly as it was rather than half-migrated. Returns
+   * an empty list in that case, which is this class's way of saying it decided
+   * nothing.
+   *
+   * Nobody is sent a catchup by this. The survivors already have the match —
+   * that is where this came from — and one that has come apart asks, which is
+   * what `repair` is for.
+   */
+  adopt(
+    state: Partial<LobbyState<Settings>>,
+    match: {
+      readonly seating: Seating<Seat>
+      readonly origin: Origin | null
+      readonly from: At
+      readonly at: At
+      readonly log: readonly (readonly number[])[]
+      readonly handovers: readonly Handover[]
+    },
+    now: number,
+  ): Decision<Who, Settings, Seat>[] {
+    if (this.running) return []
+    const places = match.seating.places
+    if (!Number.isInteger(places) || places < 1 || places > this.opts.roster) return []
+    const ok = this.match.adopt({
+      roster: places,
+      playing: [...this.holders()],
+      now,
+      origin: match.origin,
+      from: match.from,
+      at: match.at,
+      log: match.log,
+      handovers: match.handovers,
+    })
+    if (!ok) return []
+    this.lobby.restore(state)
+    this.running = true
+    this.laid = match.seating
+    // The one thing about a running match a room cannot work out again, and the
+    // restored lobby state may well be from before the drop.
+    this.lobby.lay(places)
+    // Whose fingerprints these were is gone with the room they were taken in,
+    // and a disagreement is only meaningful between two clients still here.
+    this.prints.clear()
+    return [
+      { kind: 'remember', state: this.lobby.snapshot(), started: true },
+      { kind: 'lobby', view: this.view() },
+      this.listing(now),
+      { kind: 'wake', inMs: this.beat() },
+    ]
+  }
+
+  /**
    * Pick a running match back up in a room that never saw it start.
    *
    * A room's memory can be lost while the people in it stay connected — a

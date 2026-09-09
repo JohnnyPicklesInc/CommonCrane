@@ -112,7 +112,8 @@ a browser in behind it.
 | `@johnnypickles/room/authority` | One machine simulates and sends out what happened. |
 | `@johnnypickles/room/follower` | The other side of an authority: holding a world somebody else simulates. |
 | `@johnnypickles/room/client` | Browser side — a WebSocket transport, invite URLs, update watching. |
-| `@johnnypickles/room/durable` | Glue for a Cloudflare Durable Object. The only host adapter that exists; writing another is about thirty lines. |
+| `@johnnypickles/room/host` | The part of a host that is the same on every host: what a connection holds, sending to one or all, the heartbeat, and the four decisions that are about hosting rather than about the game. |
+| `@johnnypickles/room/durable` | Glue for a Cloudflare Durable Object. Writing another host is about thirty lines against `host`. |
 
 See [docs/api.md](docs/api.md) for what each one exports.
 

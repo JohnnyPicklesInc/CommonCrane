@@ -36,6 +36,7 @@ different shapes is not five different rules.
 | `settle(now)` | The point everything decided now should land on. |
 | `depart(who)` | They are gone. |
 | `restore(state, started)` | A room waking up with its memory written down. |
+| `adopt(state, match, now)` | Become the room, on a machine that was only ever a client of it. Both halves in one call, and validated before anything is touched. |
 | `refresh(now?)` | The room as it stands, without deciding anything new. |
 | `isHost(who, except?)` | Whether this connection is the one that may propose and begin. |
 
@@ -47,7 +48,7 @@ other than a room.
 
 | Export | Is |
 |---|---|
-| `Match` | A match as the room holds it: the transitions rather than the parts. |
+| `Match` | A match as the room holds it: the transitions rather than the parts. `begin`, `resume` and `adopt` are three different ways in: from nothing, from a room that forgot, and from another machine's `catchup()`. |
 | `Lobby` | The room before the game starts, and the settings it carries in. |
 | `ContributionLog` | Everything the players have sent, by player and by point. A deterministic sim plus its inputs *is* the game, so replaying this is how a latecomer arrives, how a broken client is repaired, and how a saved match loads. |
 | `Presence` | Who has gone quiet, judged on a wall clock — silence, never distance. |
@@ -119,3 +120,27 @@ nothing.
 - `beat(storage, inMs)` — keeping the alarm alive. Answers a `wake` decision:
   it both clears the fired alarm and schedules the next, so a room that has
   gone quiet stops beating rather than beating forever.
+
+## `@johnnypickles/room/host`
+
+`durable` with the Cloudflare taken out of it. The same five things every host
+needs — read what a connection holds, change one field of it, send to one, send
+to all but one, look again no later than a deadline — against interfaces you
+supply, so a peer-hosted game gets them with a Steam identity where the socket
+was.
+
+- `Peers<Who, Held>` — the four operations a host supplies: `all()`,
+  `attachment(who)`, `attach(who, held)`, `send(who, payload)`. Membership is
+  asked for, never kept, for the same reason `Room` asks: on a host whose
+  connections outlive its memory, the connections are the only record that
+  survives.
+- `Host` — `held`/`hold`, `sendTo`/`broadcast` (serialised once, because an
+  input echo is the hot path), and `carry(decisions, from?)`.
+- `carry` takes the four decisions that are about being a host — `remember`,
+  `wake`, `listed`, `recycle` — and hands everything else to your `say`. The
+  other twelve are things to tell people, and what to call them is your
+  protocol's business. The four are passed on to `say` as well rather than
+  swallowed.
+- `heartbeat(look)` — `beat` over plain timers, for a host that stays in
+  memory. Brings a pending wake forward when asked for sooner and leaves one
+  already sooner alone.

@@ -93,7 +93,12 @@ export interface BeginOptions {
 
 export class Match {
   private readonly opts: MatchOptions
-  private readonly contributions: ContributionLog<number>
+  /**
+   * Not readonly, because `adopt` replaces it: a log taken over from another
+   * machine begins where that machine's began, and the origin is fixed when the
+   * log is built.
+   */
+  private contributions: ContributionLog<number>
   private readonly presence: Presence
   private readonly decisions = new DecisionLog<Handover>()
   /**
@@ -243,6 +248,100 @@ export class Match {
       if (!playing.has(p)) this.automatic[p] = true
     }
     for (const p of o.playing) this.presence.reset(p, o.now)
+  }
+
+  /**
+   * Take a running match over from whoever was holding it.
+   *
+   * The inverse of `catchup()`, and the whole reason a room can change machines
+   * mid-match. A room that never simulates *is* its log — replay it from the
+   * origin and you have the match — so the payload written to describe a match
+   * to a latecomer is also everything needed to become the thing describing it.
+   * One mechanism, now doing a fourth job.
+   *
+   * The difference from `resume` is the difference between having the history
+   * and guessing at it, and it is worth being explicit about because `resume`
+   * gives up two things this does not have to:
+   *
+   * `resume` cannot date anything until somebody speaks, because with no log the
+   * schedule anchors on "never spoke" — a point at the very beginning of a match
+   * thousands of points along. This arrives holding the log, so `head` and
+   * `lastFrom` are real from the first moment and a handover can be dated
+   * immediately. Hence `oriented` is true here and false there.
+   *
+   * `resume` also has to guess who was driving what, from the connections alone.
+   * The handover schedule says, so this reads it — and then still marks anybody
+   * who is no longer connected as automatic, because the schedule describes the
+   * room that died rather than the one being built.
+   *
+   * What it does NOT inherit is the presence clock. Nobody may be judged silent
+   * for time this object was not there for, which is the one thing `resume` gets
+   * right for the same reason: a fresh clock has heard from nobody, so keeping
+   * it would find everybody quiet a moment later and hand every place away at
+   * once.
+   *
+   * Returns false, having changed nothing, for a payload that does not describe
+   * a match. Strict on purpose: a log a row short or a span off by one does not
+   * fail, it plays a different game, and this is the one moment there is
+   * something to check it against.
+   */
+  adopt(o: {
+    readonly roster: number
+    readonly playing: readonly number[]
+    readonly now: number
+    readonly origin: Origin | null
+    readonly from: At
+    readonly at: At
+    readonly log: readonly (readonly number[])[]
+    readonly handovers: readonly Handover[]
+  }): boolean {
+    if (!Number.isInteger(o.roster) || o.roster < 1 || o.roster > this.opts.players) return false
+    if (!Number.isInteger(o.from) || !Number.isInteger(o.at) || o.from < 0) return false
+    // An empty log is `at === from - 1`: a match that has begun and that nobody
+    // has spoken for yet. Anything below that is not a timeline.
+    if (o.at < o.from - 1) return false
+    if (o.log.length !== o.roster) return false
+    const span = o.at - o.from + 1
+    for (const row of o.log) if (row.length !== span) return false
+    if (o.origin !== null && (!Number.isInteger(o.origin.at) || o.origin.at !== o.from)) {
+      // The origin is where the rows begin, so a state dated anywhere else
+      // describes a replay that starts in one place and is fed inputs from
+      // another.
+      return false
+    }
+
+    this.running = true
+    // Holding the log is knowing where the match is — see above.
+    this.knowsWhere = true
+    this.roster = o.roster
+    this.start = o.origin
+    // The world in use is also the newest one seen, so a later offer has to beat
+    // it. Left null, the first offer from the new host would be taken as an
+    // improvement on nothing and could cut the log back to a point behind where
+    // it already begins.
+    this.pending = o.origin
+    this.contributions = new ContributionLog<number>({
+      players: this.opts.players,
+      origin: o.from,
+    })
+    for (let p = 0; p < o.log.length; p++) this.contributions.record(p, o.from, o.log[p]!)
+    this.decisions.clear()
+    for (const h of o.handovers) this.decisions.add(h.at, h)
+    // Who was driving what, as the schedule left it. Later entries win because
+    // the log is in the order the decisions were taken.
+    const said = new Map<number, boolean>()
+    for (const h of o.handovers) said.set(h.p, h.on)
+    const playing = new Set(o.playing)
+    this.automatic.fill(false)
+    for (let p = 0; p < o.roster; p++) {
+      // Not connected wins over anything the schedule said: it is evidence
+      // about the room that died. A place nobody was ever handed over is its
+      // player's, which is what a match opens on.
+      this.automatic[p] = !playing.has(p) || (said.get(p) ?? false)
+    }
+    this.presence.clear()
+    for (const p of o.playing) this.presence.reset(p, o.now)
+    return true
   }
 
   /** Give the match back. A room being recycled for a fresh one. */

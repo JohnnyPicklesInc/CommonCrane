@@ -41,6 +41,10 @@
       "types": "./dist/durable.d.ts",
       "import": "./dist/durable.js"
     },
+    "./host": {
+      "types": "./dist/host.d.ts",
+      "import": "./dist/host.js"
+    },
     "./authority": {
       "types": "./dist/authority.d.ts",
       "import": "./dist/authority.js"
