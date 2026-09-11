@@ -173,6 +173,29 @@ export interface RoomOptions<Who, Settings, Seat> {
    * One of these games worked that out for itself and the other did not.
    */
   readonly paceMs?: number
+  /**
+   * How long a room with nobody in it is kept before it is thrown away. Never,
+   * if left out.
+   *
+   * A room is given up when its last connection departs, and a departure is
+   * something a *closing* socket does. Sockets do not always close. A redeploy
+   * severs every one in a room at once and not one of them departs; so does a
+   * host shedding a machine, and a phone going into a tunnel. What is left
+   * behind is an object that believes a match is running, finds nobody there,
+   * and beats at `paceMs` — for ever, because `tick` reschedules whatever it
+   * finds.
+   *
+   * Measured in one of the games: play stopped at 23:00 and its rooms went on
+   * taking 7,300 requests an hour all night, flat, with nobody in a game. Two
+   * abandoned rooms at one beat a second. On the hosting this runs on that was
+   * more than the whole daily allowance, spent on nothing.
+   *
+   * Left out on purpose rather than defaulted, because how long an empty room
+   * is worth keeping is the game's to say and not this library's. A game whose
+   * clients reconnect wants longer than the reconnecting takes. A game people
+   * come back to in the evening may want a room never collected at all.
+   */
+  readonly emptyMs?: number
   readonly settings: Settings
   readonly checkSettings: Check<Settings>
   readonly checkSeat: Check<Seat>
@@ -805,7 +828,72 @@ export class Room<Who, Settings, Seat> {
    * along, which fails at the moment that player stops too — so a room that
    * has gone quiet needs somebody to look at it who is not in it.
    */
+  /**
+   * Throw the room away. Everybody has gone, however they went.
+   *
+   * Two ways to get here and they have to end in the same state, which is why
+   * this is one piece of code rather than two that look alike. The last person
+   * leaving is the ordinary one. The other is a room that finds itself empty
+   * without anybody having left — see `emptyMs`.
+   */
+  /**
+   * When this room last found itself with nobody in it, or -1 while somebody
+   * is.
+   *
+   * Not persisted anywhere, and it does not need to be: a room whose host has
+   * forgotten it is a room that will notice it is empty again on its next beat
+   * and start the wait afresh. The cost of losing it is one more wait, and the
+   * thing that must not happen — collecting a room out from under people who
+   * are reconnecting — cannot be caused by forgetting it.
+   */
+  private emptySince = -1
+
+  private giveUp(): Decision<Who, Settings, Seat>[] {
+    // Take the listing down before the room is thrown away: wiping the storage
+    // loses the code the entry is filed under, so doing it the other way round
+    // strands the entry until it goes stale.
+    // Named before the room forgets it: the delisting has to say which entry it
+    // means, and a moment later there is nothing left to ask.
+    const code = this.lobby.code
+    this.running = false
+    this.laid = null
+    this.emptySince = -1
+    this.match.end()
+    this.prints.clear()
+    this.lobby.restore({
+      settings: this.opts.settings,
+      announced: false,
+      build: '',
+      code: '',
+      since: 0,
+      places: 0,
+    })
+    return [
+      { kind: 'listed', entry: null, code },
+      { kind: 'wake', inMs: null },
+      { kind: 'recycle' },
+    ]
+  }
+
   tick(now: number): Decision<Who, Settings, Seat>[] {
+    // Nobody here. Asked before anything else, because everything else in this
+    // method is about a room somebody is in — `wake` would pick a match back up
+    // on behalf of an empty room, and the beat at the end would book the next
+    // one whatever it found. See `emptyMs`.
+    if (this.opts.emptyMs !== undefined && this.opts.members().length === 0) {
+      // -1 rather than 0 for "somebody is here": zero is a time, and a clock
+      // that starts at it would restart the wait on every beat.
+      if (this.emptySince < 0) this.emptySince = now
+      const left = this.opts.emptyMs - (now - this.emptySince)
+      if (left <= 0) return this.giveUp()
+      // Still worth keeping, in case somebody is on their way back. Looked at
+      // no sooner than the ordinary beat and no later than the end of the wait,
+      // so it is collected when it is due rather than at whatever beat comes
+      // after.
+      const beat = this.beat()
+      return [{ kind: 'wake', inMs: left < beat ? left : beat }]
+    }
+    this.emptySince = -1
     this.wake(now)
     const out: Decision<Who, Settings, Seat>[] = []
     if (this.running) {
@@ -941,27 +1029,7 @@ export class Room<Who, Settings, Seat> {
     }
     const remaining = this.opts.members().filter((m) => m.who !== who)
     if (remaining.length === 0) {
-      // Take the listing down before the room is thrown away: wiping the
-      // storage loses the code the entry is filed under, so doing it the other
-      // way round strands the entry until it goes stale.
-      // Named before the room forgets it: the delisting has to say which entry
-      // it means, and a moment later there is nothing left to ask.
-      const code = this.lobby.code
-      this.running = false
-      this.laid = null
-      this.match.end()
-      this.prints.clear()
-      this.lobby.restore({
-        settings: this.opts.settings,
-        announced: false,
-        build: '',
-        code: '',
-        since: 0,
-        places: 0,
-      })
-      out.push({ kind: 'listed', entry: null, code })
-      out.push({ kind: 'wake', inMs: null })
-      out.push({ kind: 'recycle' })
+      out.push(...this.giveUp())
       return out
     }
     // The departing connection is still a member as far as the caller is

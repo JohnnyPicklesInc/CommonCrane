@@ -17,9 +17,10 @@ const CAPACITY = 6
 const ROSTER = 6
 
 /** A room whose membership is a plain array the test moves about. */
-function room() {
+function room(opts: { emptyMs?: number } = {}) {
   const members: Member<string, Seat>[] = []
   const r = new Room<string, Settings, Seat>({
+    ...(opts.emptyMs === undefined ? {} : { emptyMs: opts.emptyMs }),
     capacity: CAPACITY,
     roster: ROSTER,
     clock: rollbackClock({ window: WINDOW, slack: 4 }),
@@ -317,6 +318,62 @@ describe('the clock', () => {
     expect(find(out, 'wake')?.inMs).toBeNull()
     // And in that order: stop the clock before the room is thrown away.
     expect(kinds(out).indexOf('wake')).toBeLessThan(kinds(out).indexOf('recycle'))
+  })
+
+  it('gives up a room that emptied without anybody leaving', () => {
+    // The case `depart` cannot see. A room is thrown away when its last
+    // connection leaves, and leaving is something a *closing* socket does — so
+    // a redeploy, which severs every socket at once, leaves a room that
+    // believes a match is running, finds nobody in it, and beats at `paceMs`
+    // for ever. Measured in one of the games: play stopped at 23:00 and its
+    // rooms took 7,300 requests an hour all night with nobody in a game.
+    const { r, join, drop } = room({ emptyMs: 60_000 })
+    join('Alice')
+    drop('Alice') // severed, not departed
+
+    // It waits before giving up, because somebody may be reconnecting.
+    const waiting = r.tick(0)
+    expect(kinds(waiting)).toEqual(['wake'])
+    expect(find(waiting, 'wake')?.inMs).toBe(45_000) // the idle beat, not paceMs
+    expect(kinds(r.tick(30_000))).toEqual(['wake'])
+
+    const out = r.tick(60_000)
+    expect(kinds(out)).toContain('recycle')
+    expect(find(out, 'wake')?.inMs).toBeNull()
+    // And in that order, the same as the departing case: stop the clock before
+    // the room is thrown away.
+    expect(kinds(out).indexOf('wake')).toBeLessThan(kinds(out).indexOf('recycle'))
+  })
+
+  it('looks again at the end of the wait rather than after it', () => {
+    // Or a room whose wait is shorter than its heartbeat is collected at
+    // whatever beat happens to come next, which for a lobby is 45 seconds of
+    // beating past the point it was due.
+    const { r, join, drop } = room({ emptyMs: 5_000 })
+    join('Alice')
+    drop('Alice')
+    expect(find(r.tick(0), 'wake')?.inMs).toBe(5_000)
+  })
+
+  it('keeps a room somebody came back to', () => {
+    const { r, join, drop } = room({ emptyMs: 60_000 })
+    join('Alice')
+    drop('Alice')
+    r.tick(0) // the wait starts
+    join('Alice') // and she is back
+    expect(kinds(r.tick(30_000))).not.toContain('recycle')
+    // The wait starts again from here, not from when she first went.
+    expect(kinds(r.tick(80_000))).not.toContain('recycle')
+  })
+
+  it('leaves an empty room alone when no wait was asked for', () => {
+    // Left out, nothing changes: how long an empty room is worth keeping is the
+    // game's to say, and a game that never says it keeps what it always had.
+    const { r, join, drop } = room()
+    join('Alice')
+    drop('Alice')
+    expect(kinds(r.tick(0))).not.toContain('recycle')
+    expect(kinds(r.tick(10_000_000))).not.toContain('recycle')
   })
 
   it('does not offer the same listing again on every beat', () => {
