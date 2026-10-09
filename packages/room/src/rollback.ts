@@ -615,7 +615,12 @@ export class Rollback<State> {
    * disagreement on essentially every checkpoint as soon as anybody moves.
    */
   takeConfirmedHash(): { at: At; h: number } | null {
-    const confirmed = this.confirmed()
+    // Never past what this machine has played. The line can run ahead of it —
+    // a place handed back is settled up to the point it was handed back on the
+    // moment that is heard, and a machine that was stalled hears it while still
+    // behind that point. Walked past, a checkpoint not played yet has no hash
+    // and is skipped for good, so the room never compares those seconds.
+    const confirmed = Math.min(this.confirmed(), this.at - 1)
     while (this.nextHash <= confirmed) {
       const at = this.nextHash
       this.nextHash += this.opts.hashEvery

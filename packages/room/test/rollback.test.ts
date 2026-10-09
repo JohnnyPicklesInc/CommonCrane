@@ -351,3 +351,21 @@ describe('fingerprints after a catch-up', () => {
     for (const [at, h] of mine) expect(h).toBe(seen.get(at))
   })
 })
+
+describe('fingerprints on a machine that was stalled', () => {
+  it('does not skip the checkpoints it has not played yet when the line runs ahead of it', () => {
+    // Place 1 is ours. Handed away at 50 and back at 650, both heard before
+    // playing either: the hand-back settles everything before 650 at once,
+    // while this machine is still at the opening point.
+    const r = engine(2, [1])
+    r.handover(1, 50, true)
+    r.handover(1, 650, false)
+    r.applyRemote(0, 0, new Array(700).fill(1))
+    const got: number[] = []
+    for (let k = 0; k < 2000 && r.at < 700; k++) {
+      r.advance(16, (p, at) => r.setLocalInput(p, at, 1))
+      for (let c = r.takeConfirmedHash(); c !== null; c = r.takeConfirmedHash()) got.push(c.at)
+    }
+    expect(got.slice(0, 10)).toEqual([60, 120, 180, 240, 300, 360, 420, 480, 540, 600])
+  })
+})
