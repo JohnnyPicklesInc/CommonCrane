@@ -68,6 +68,21 @@ export class Watermark {
   }
 
   /**
+   * Everything of theirs up to `at` is settled, and none of it is held.
+   *
+   * What a catch-up is: a run of real input played through and then thrown
+   * away, because nothing can rewind that far. The walk cannot step through
+   * points that are no longer stored, so it is told where they end — left to
+   * walk from the opening point, it finds the very first one missing and the
+   * line stays at -1 for the rest of the match, which is every fingerprint and
+   * every world this machine would have offered.
+   */
+  known(player: number, at: At): void {
+    if (player < 0 || player >= this.players) return
+    if (this.through[player]! < at) this.through[player] = at
+  }
+
+  /**
    * The newest point every player's real input is known for.
    *
    * `holds(player, at)` answers "do I have their real input for that point" —

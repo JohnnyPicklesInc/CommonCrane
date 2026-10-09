@@ -282,3 +282,72 @@ describe('waiting for somebody who has gone', () => {
     expect(quiet.find((q) => q.p === 1)!.forMs).toBeGreaterThan(500)
   })
 })
+
+/** Play both places forward to `to`, with every input real and every place sending 1. */
+function playTo(r: ReturnType<typeof engine>, local: number, to: number, each?: (t: number) => void) {
+  while (r.at < to) {
+    const t = r.at
+    r.setLocalInput(local, t, 1)
+    r.applyRemote(1 - local, t, [1])
+    r.advance(16, () => {})
+    each?.(t)
+  }
+}
+
+describe('who was driving, on a machine that heard it late', () => {
+  it('plays the stretch between a handover and a hand-back on the computer, however late both are heard', () => {
+    // The room hands place 1 to the computer at 50 and back at 150. One machine
+    // hears each as it goes by; the other was the one stalled, and hears both
+    // before it has played either. Both have to play the same match.
+    const onTime = engine(2, [0])
+    const late = engine(2, [0])
+    late.handover(1, 50, true)
+    late.handover(1, 150, false)
+    playTo(onTime, 0, 200, (t) => {
+      if (t === 60) onTime.handover(1, 50, true)
+      if (t === 160) onTime.handover(1, 150, false)
+    })
+    // Everybody else has already played it, so all of place 1's input is here.
+    late.applyRemote(1, 0, new Array(200).fill(1))
+    playTo(late, 0, 200)
+    expect(late.state.sum).toBe(onTime.state.sum)
+    // And the computer really did have it: a hundred points of place 1's input
+    // went unread.
+    expect(onTime.state.sum).toBe(200 * 2 - 100)
+  })
+
+  it('says every decision it was given, not only the newest', () => {
+    const r = engine(2, [0])
+    r.handover(1, 50, true)
+    r.handover(1, 150, false)
+    expect(r.schedule()).toEqual([
+      { p: 1, at: 50, on: true },
+      { p: 1, at: 150, on: false },
+    ])
+  })
+})
+
+describe('fingerprints after a catch-up', () => {
+  it('goes on taking them, and they agree with a machine that was there all along', () => {
+    // A machine that arrives by catch-up keeps only the tail of the log. The
+    // watermark used to walk from the opening point, find it missing, and stay
+    // at -1 — so the machine never published a fingerprint again, and nor did
+    // the room ever compare one with it.
+    const there = engine(2, [0])
+    const seen = new Map<number, number>()
+    const take = (r: ReturnType<typeof engine>, into: Map<number, number>) => {
+      for (let c = r.takeConfirmedHash(); c !== null; c = r.takeConfirmedHash()) into.set(c.at, c.h)
+    }
+    playTo(there, 0, 600, () => take(there, seen))
+
+    const arrived = engine(2, [1])
+    arrived.catchUp([new Array(600).fill(1), new Array(600).fill(1)], 599)
+    const mine = new Map<number, number>()
+    playTo(arrived, 1, 900, () => take(arrived, mine))
+    playTo(there, 0, 900, () => take(there, seen))
+
+    expect(arrived.confirmed()).toBeGreaterThan(599)
+    expect(mine.size).toBeGreaterThan(0)
+    for (const [at, h] of mine) expect(h).toBe(seen.get(at))
+  })
+})

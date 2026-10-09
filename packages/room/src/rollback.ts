@@ -235,8 +235,33 @@ export class Rollback<State> {
    * once when the message landed would be undone by the next correction that
    * crossed it. Re-read every step instead, so resimulating a point reproduces
    * who was driving.
+   *
+   * Every decision for a place, oldest point first — not only the newest. A
+   * place goes quiet, is handed to the computer, and is handed back when its
+   * player speaks again; the machine that went quiet is the one furthest
+   * behind, so it hears both before it has played either. Kept as one entry,
+   * the hand-back overwrote the handover and that machine played the whole
+   * stretch between with nobody automating the place, while every other
+   * machine had the computer in it.
    */
-  private readonly autoFrom = new Map<number, { at: At; on: boolean }>()
+  private readonly autoFrom = new Map<number, { at: At; on: boolean }[]>()
+
+  /** Add a decision to a place's schedule. Ties keep the order they were sent in. */
+  private schedulePlace(player: number, at: At, on: boolean): boolean {
+    let list = this.autoFrom.get(player)
+    if (list === undefined) this.autoFrom.set(player, (list = []))
+    if (list.some((d) => d.at === at && d.on === on)) return false
+    let i = list.length
+    while (i > 0 && list[i - 1]!.at > at) i--
+    list.splice(i, 0, { at, on })
+    return true
+  }
+
+  /** The decision in force for a place at `t`: the newest one dated at or before it. */
+  private decisionAt(list: readonly { at: At; on: boolean }[], t: At): { at: At; on: boolean } | undefined {
+    for (let i = list.length - 1; i >= 0; i--) if (list[i]!.at <= t) return list[i]
+    return undefined
+  }
   /** A whole assignment the room named a point for. Kept, because a rollback has to put it back. */
   private assignAt: { at: At; whole: unknown } | null = null
   /**
@@ -391,9 +416,7 @@ export class Rollback<State> {
    * decision behind us rewinds to it, which is what the ring is for.
    */
   handover(player: number, at: At, on: boolean): void {
-    const had = this.autoFrom.get(player)
-    if (had !== undefined && had.at === at && had.on === on) return
-    this.autoFrom.set(player, { at, on })
+    if (!this.schedulePlace(player, at, on)) return
     if (on) this.water.released(player, at)
     else {
       this.water.reclaimed(player, at)
@@ -484,8 +507,9 @@ export class Rollback<State> {
     }
     // Who is driving, recomputed from the schedule so it is the same on every
     // machine and the same on a replay of this point as it was the first time.
-    for (const [p, d] of this.autoFrom) {
-      if (t < d.at) continue
+    for (const [p, list] of this.autoFrom) {
+      const d = this.decisionAt(list, t)
+      if (d === undefined) continue
       if (!this.sim.automate(this.state, p, d.on)) continue
       // A place just handed back is not one whose owner is late. Their
       // watermark is whatever it was before they held anything — for somebody
@@ -567,7 +591,7 @@ export class Rollback<State> {
    * playing a different game from everybody else.
    */
   schedule(): { p: number; at: At; on: boolean }[] {
-    return [...this.autoFrom].map(([p, d]) => ({ p, at: d.at, on: d.on }))
+    return [...this.autoFrom].flatMap(([p, list]) => list.map((d) => ({ p, at: d.at, on: d.on })))
   }
 
   /** Everything that happened since the last drain. */
@@ -683,7 +707,7 @@ export class Rollback<State> {
   private waitingFor(p: number): boolean {
     if (this.opts.localPlayers.includes(p)) return false
     if (this.unheard.has(p)) return false
-    if (this.autoFrom.get(p)?.on === true) return false
+    if (this.autoFrom.get(p)?.at(-1)?.on === true) return false
     if (this.assignDriving !== null && !this.assignDriving.includes(p)) return false
     if (!this.sim.holds(this.state, p)) return false
     return this.at - this.lastReal[p]! > this.opts.window
@@ -824,7 +848,7 @@ export class Rollback<State> {
     while (this.at <= to) {
       while (i < order.length && order[i]!.at <= this.at) {
         const h = order[i]!
-        this.autoFrom.set(h.p, { at: h.at, on: h.on })
+        this.schedulePlace(h.p, h.at, h.on)
         if (h.on) this.water.released(h.p, h.at)
         else this.water.reclaimed(h.p, h.at)
         i++
@@ -838,13 +862,16 @@ export class Rollback<State> {
     // that announced them is one we were never going to hear.
     for (; i < order.length; i++) {
       const h = order[i]!
-      this.autoFrom.set(h.p, { at: h.at, on: h.on })
+      this.schedulePlace(h.p, h.at, h.on)
       if (h.on) this.water.released(h.p, h.at)
       else this.water.reclaimed(h.p, h.at)
     }
     for (let p = 0; p < log.length && p < this.opts.players; p++) {
       const row = log[p]!
       for (let t = keep; t <= to && t - from < row.length; t++) this.real[p]!.set(t, row[t - from]!)
+      // Only the tail is kept, so the watermark is told the run behind it is
+      // settled rather than left to walk up to it from a point it no longer has.
+      this.water.known(p, Math.min(to, from + row.length - 1))
       this.lastReal[p] = to
       this.lastValue[p] = row[to - from] ?? this.lastValue[p]!
     }
