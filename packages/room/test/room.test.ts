@@ -646,3 +646,51 @@ describe('a watcher taking a place', () => {
   })
 })
 })
+
+describe('a place given up mid-match', () => {
+  /** Alice on 0 and Bob on 1, both speaking, with Alice about to stand up. */
+  function playing() {
+    const t = room()
+    const { r, join, sit, deal } = t
+    join('Alice'); join('Bob')
+    sit('Alice', [0]); sit('Bob', [1])
+    deal(r.begin('Alice', 2, 0))
+    r.input('Alice', 0, 0, [1, 1, 1, 1, 1], 0)
+    r.input('Bob', 1, 0, [1, 1, 1, 1, 1], 0)
+    const [h] = r.stand(0, 10)
+    // What a host does next: the connection no longer holds the place.
+    const i = t.members.findIndex((m) => m.who === 'Alice')
+    t.members[i] = { ...t.members[i]!, players: [] }
+    return { ...t, until: h!.at }
+  }
+
+  it('still takes its player’s input up to the point it was given up on', () => {
+    // Dated ahead, so she drives it for a moment after asking, and that
+    // input is the only input there will ever be for those points.
+    const { r, until } = playing()
+    expect(until).toBeGreaterThan(5)
+    const run = Array.from({ length: until + 3 - 5 }, () => 7)
+    expect(r.claim('Alice', 0, 5, run)).toEqual(run.slice(0, until - 5))
+    r.input('Alice', 0, 5, run, 20)
+    const log = r.match.catchup().log[0]!
+    expect(log.slice(5, until)).toEqual(run.slice(0, until - 5))
+    // And nothing from the point the computer has it, which is not hers.
+    expect(log.slice(until).every((v) => v !== 7)).toBe(true)
+  })
+
+  it('does not count that input as her coming back', () => {
+    // `contribute` would: speaking for an automatic place takes it straight
+    // back, which would undo the very move she asked for.
+    const { r, until } = playing()
+    const out = r.input('Alice', 0, 5, [7, 7], 20)
+    expect(find(out, 'handovers')).toBeUndefined()
+    expect(r.match.isAutomatic(0)).toBe(true)
+    expect(until).toBeGreaterThan(6)
+  })
+
+  it('takes nothing from anybody else, nor from her past that point', () => {
+    const { r, until } = playing()
+    expect(r.claim('Bob', 0, 5, [7])).toBeNull()
+    expect(r.claim('Alice', 0, until, [7])).toBeNull()
+  })
+})

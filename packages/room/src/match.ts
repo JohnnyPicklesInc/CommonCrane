@@ -380,6 +380,18 @@ export class Match {
   }
 
   /**
+   * Write a run into the record and do nothing else.
+   *
+   * For input that is real but is not somebody speaking: the last of a place
+   * its player has already given up. `contribute` would count it as them
+   * being back, and hand them the place they have just left.
+   */
+  record(player: number, from: At, run: readonly number[]): boolean {
+    if (!this.running) return false
+    return this.contributions.record(player, from, run)
+  }
+
+  /**
    * Somebody spoke, without saying anything about the timeline.
    *
    * The presence clock measures silence, not contributions — and on a netcode

@@ -229,6 +229,17 @@ export class Room<Who, Settings, Seat> {
   private readonly opts: RoomOptions<Who, Settings, Seat>
   private readonly lobby: Lobby<Settings, Seat>
   private readonly prints: Fingerprints
+  /**
+   * Places just given up, by whom, and the point they stopped being theirs.
+   *
+   * A place given up is dated a little ahead, so its player is still driving
+   * it for a moment after asking — and their input for that moment is the
+   * only input there will ever be for it. Turned away because the connection
+   * no longer holds the place, it leaves a hole every other machine fills by
+   * guessing; one guessed "nothing pressed" over a switch and a pass, and
+   * finished 2-0 a match the machine that pressed them finished 3-0.
+   */
+  private readonly giving = new Map<number, { who: Who; until: At }>()
   readonly match: Match
   private running = false
   /**
@@ -357,6 +368,7 @@ export class Room<Who, Settings, Seat> {
     // Whose fingerprints these were is gone with the room they were taken in,
     // and a disagreement is only meaningful between two clients still here.
     this.prints.clear()
+    this.giving.clear()
     return [
       { kind: 'remember', state: this.lobby.snapshot(), started: true },
       { kind: 'lobby', view: this.view() },
@@ -708,6 +720,7 @@ export class Room<Who, Settings, Seat> {
     if (laid === null) return []
     this.running = true
     this.prints.clear()
+    this.giving.clear()
     this.laid = laid
     // Written down at the drop, because it is the one thing about a running
     // match that a room waking up with no memory cannot work out again.
@@ -760,6 +773,7 @@ export class Room<Who, Settings, Seat> {
     this.laid = null
     this.match.end()
     this.prints.clear()
+    this.giving.clear()
     this.lobby.lay(0)
     return [
       { kind: 'remember', state: this.lobby.snapshot(), started: false },
@@ -775,18 +789,46 @@ export class Room<Who, Settings, Seat> {
     if (!this.running || this.laid === null) return []
     if (this.match.head < 0) return []
     this.prints.clear()
+    this.giving.clear()
     this.match.begin({ roster: this.laid.places, playing: [...this.holders()], now })
     return [{ kind: 'begun', seating: this.laid }]
+  }
+
+  /**
+   * The part of a run that `who` may speak for, or null for none of it.
+   *
+   * A connection may only speak for the places it was dealt. Checked rather
+   * than corrected, because one connection can drive several of them and
+   * overwriting the sender's own is not a thing that can be done. The one
+   * exception is a place it has just given up, which is still its own up to
+   * the point it was given up on: that much comes back, cut short there, as a
+   * different array from `run`.
+   *
+   * Asked by whoever relays the run as well as by `input`, so the two cannot
+   * disagree about what gets through.
+   */
+  claim(who: Who, player: number, from: At, run: readonly number[]): readonly number[] | null {
+    const mine = this.opts.members().find((m) => m.who === who)
+    if (mine === undefined) return null
+    if (mine.players.includes(player)) return run
+    const gave = this.giving.get(player)
+    if (gave === undefined || gave.who !== who) return null
+    const keep = gave.until - from
+    return keep > 0 ? run.slice(0, keep) : null
   }
 
   /** A run of input from somebody, and whatever the clock makes of it. */
   input(who: Who, player: number, from: At, run: readonly number[], now: number): Decision<Who, Settings, Seat>[] {
     this.wake(now)
-    const mine = this.opts.members().find((m) => m.who === who)
-    // A connection may only speak for the places it was dealt. Checked rather
-    // than corrected, because one connection can drive several of them and
-    // overwriting the sender's own is not a thing that can be done.
-    if (mine === undefined || !mine.players.includes(player)) return []
+    const claimed = this.claim(who, player, from, run)
+    if (claimed === null) return []
+    if (claimed !== run) {
+      // The tail of a place given up: recorded, so a catchup replays what was
+      // really pressed, and nothing more. It is not somebody speaking again,
+      // which would hand them back the place they have just left.
+      this.match.record(player, from, claimed)
+      return []
+    }
     const out: Decision<Who, Settings, Seat>[] = []
     const changes = this.match.contribute(player, from, run, now) ?? []
     if (changes.length > 0) out.push({ kind: 'handovers', changes })
@@ -860,6 +902,7 @@ export class Room<Who, Settings, Seat> {
     this.emptySince = -1
     this.match.end()
     this.prints.clear()
+    this.giving.clear()
     this.lobby.restore({
       settings: this.opts.settings,
       announced: false,
@@ -977,7 +1020,13 @@ export class Room<Who, Settings, Seat> {
    * place that has already stopped speaking.
    */
   stand(player: number, now: number): Handover[] {
-    return this.match.leave(player, now)
+    // Asked before the caller moves them, so who holds it is still on record.
+    const holder = this.opts.members().find((m) => m.players.includes(player))
+    const out = this.match.leave(player, now)
+    for (const h of out) {
+      if (holder !== undefined && h.on) this.giving.set(h.p, { who: holder.who, until: h.at })
+    }
+    return out
   }
 
   /**
