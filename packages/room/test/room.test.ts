@@ -17,10 +17,11 @@ const CAPACITY = 6
 const ROSTER = 6
 
 /** A room whose membership is a plain array the test moves about. */
-function room(opts: { emptyMs?: number } = {}) {
+function room(opts: { emptyMs?: number; remind?: boolean } = {}) {
   const members: Member<string, Seat>[] = []
   const r = new Room<string, Settings, Seat>({
     ...(opts.emptyMs === undefined ? {} : { emptyMs: opts.emptyMs }),
+    ...(opts.remind === undefined ? {} : { remind: opts.remind }),
     capacity: CAPACITY,
     roster: ROSTER,
     clock: rollbackClock({ window: WINDOW, slack: 4 }),
@@ -692,5 +693,96 @@ describe('a place given up mid-match', () => {
     const { r, until } = playing()
     expect(r.claim('Bob', 0, 5, [7])).toBeNull()
     expect(r.claim('Alice', 0, until, [7])).toBeNull()
+  })
+})
+
+describe('a room told its match again', () => {
+  /**
+   * A match two people played for a while, then a redeploy: a fresh object, the
+   * written-down lobby, `started`, and nobody connected — the redeploy took
+   * them too. What the room had is what a catch-up would have said.
+   */
+  const played = () => {
+    const { r, join, sit, deal } = room()
+    join('Alice'); join('Bob')
+    sit('Alice', [0]); sit('Bob', [1])
+    const begun = deal(r.begin('Alice', 2, 0))
+    r.input('Alice', 0, 0, [1, 2, 3, 4], 0)
+    r.input('Bob', 1, 0, [5, 6, 7, 8], 0)
+    const state = find(begun, 'remember')!.state
+    const seating = { ...find(begun, 'begun')!.seating, dealt: [] }
+    return { state, seating, caught: r.match.catchup() }
+  }
+  const woken = (state: ReturnType<typeof played>['state']) => {
+    const w = room({ remind: true })
+    w.r.restore(state, true)
+    return w
+  }
+  const back = (w: ReturnType<typeof woken>, who: string) => {
+    const out = w.r.arrive(who, { name: who, build: 'v1', announce: false, code: 'ABCD' }, 100)
+    for (const d of out) if (d.kind === 'seated') w.members.push({ who, chairs: [...d.chairs], name: who, seats: [], players: [] })
+    return [...out, ...(out.some((d) => d.kind === 'refuse') ? [] : w.r.arrived(who, who, 100))]
+  }
+
+  it('still turns people away unless the host asked for this', () => {
+    // The option is what promises somebody will answer `forgotten`. Without it
+    // an arrival let in to watch would wait for a catch-up that never comes.
+    const { state } = played()
+    const w = room()
+    w.r.restore(state, true)
+    const out = w.r.arrive('Alice', { name: 'Alice', build: 'v1', announce: false, code: 'ABCD' }, 100)
+    expect(kinds(out)).toEqual(['refuse'])
+  })
+
+  it('lets somebody back in to watch, and asks them for the match', () => {
+    const { state } = played()
+    const w = woken(state)
+    const out = back(w, 'Alice')
+    expect(kinds(out)).toContain('watching')
+    expect(find(out, 'forgotten')?.who).toBe('Alice')
+    // Not a catch-up: there is nothing yet to catch anybody up to.
+    expect(find(out, 'catchup')).toBeUndefined()
+  })
+
+  it('takes the match back and catches up everybody waiting, the reminder included', () => {
+    const { state, seating, caught } = played()
+    const w = woken(state)
+    back(w, 'Alice')
+    back(w, 'Bob')
+    const out = w.r.remind('Alice', { seating, ...caught }, 200)
+    const catchups = out.filter((d) => d.kind === 'catchup') as Extract<Decision<string, Settings, Seat>, { kind: 'catchup' }>[]
+    expect(catchups.map((c) => c.who).sort()).toEqual(['Alice', 'Bob'])
+    expect(catchups[0]!.log).toEqual(caught.log)
+    expect(catchups[0]!.at).toBe(caught.at)
+    expect(w.r.seating?.places).toBe(2)
+    // And it is a running match again: somebody watching can be given a place.
+    expect(w.r.take('Alice', () => true)).toBe(0)
+  })
+
+  it('ignores a second reminder, and only catches its sender up', () => {
+    // Two people come back with the match. The first is the match; the second
+    // is a latecomer to it, and the fingerprints are what notice if the two
+    // disagreed.
+    const { state, seating, caught } = played()
+    const w = woken(state)
+    back(w, 'Alice')
+    w.r.remind('Alice', { seating, ...caught }, 200)
+    back(w, 'Bob')
+    const forged = { ...caught, log: caught.log.map((row) => row.map(() => 9)) }
+    const out = w.r.remind('Bob', { seating, ...forged }, 300)
+    expect(kinds(out)).toEqual(['catchup'])
+    const c = find(out, 'catchup')!
+    expect(c.log).toEqual(caught.log)
+  })
+
+  it('stays forgotten when told something that is not a match', () => {
+    // A row a point short does not fail, it plays a different game — so it is
+    // refused outright, and the room goes on asking.
+    const { state, seating, caught } = played()
+    const w = woken(state)
+    back(w, 'Alice')
+    const short = { ...caught, log: caught.log.map((row) => row.slice(1)) }
+    expect(w.r.remind('Alice', { seating, ...short }, 200)).toEqual([])
+    expect(find(back(w, 'Bob'), 'forgotten')?.who).toBe('Bob')
   })
 })

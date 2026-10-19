@@ -122,6 +122,12 @@ export type Decision<Who, Settings, Seat> =
   /** Two clients have stopped playing the same game. */
   | { readonly kind: 'disagreed'; readonly at: At }
   /**
+   * The room knows a match is running and has forgotten it. Ask this arrival
+   * for it — they may have been in it — and pass the answer to `remind`.
+   * Only with `remind` on.
+   */
+  | { readonly kind: 'forgotten'; readonly who: Who }
+  /**
    * Put the room on the public list under these terms, or take it off.
    *
    * `code` is carried rather than looked up afterwards, because taking a room
@@ -196,6 +202,24 @@ export interface RoomOptions<Who, Settings, Seat> {
    * come back to in the evening may want a room never collected at all.
    */
   readonly emptyMs?: number
+  /**
+   * Let a room that has forgotten its match be told it again.
+   *
+   * A redeploy restarts the room and severs every connection in it at once.
+   * What comes back knows a match is running and nothing else, and nobody is
+   * left connected to orient it — so every attempt to come back is refused,
+   * because there is no match it could describe to them. But each of them is
+   * holding the whole of it: a client of a rollback match has been receiving
+   * every player's input all along. With this on, a room in that state lets
+   * arrivals in to watch and says so with `forgotten`; the host asks them for
+   * the match, hands what it gets to `remind`, and from then on it is a
+   * running match like any other.
+   *
+   * Off unless asked for, because it needs the host to answer `forgotten`. A
+   * host that does not is a room where everybody coming back waits for ever,
+   * which is worse than being turned away.
+   */
+  readonly remind?: boolean
   readonly settings: Settings
   readonly checkSettings: Check<Settings>
   readonly checkSeat: Check<Seat>
@@ -345,7 +369,7 @@ export class Room<Who, Settings, Seat> {
     },
     now: number,
   ): Decision<Who, Settings, Seat>[] {
-    if (this.running) return []
+    if (this.running && !this.forgotten()) return []
     const places = match.seating.places
     if (!Number.isInteger(places) || places < 1 || places > this.opts.roster) return []
     const ok = this.match.adopt({
@@ -394,6 +418,16 @@ export class Room<Who, Settings, Seat> {
   private wake(now: number): void {
     if (!this.running || this.match.started) return
     this.match.resume({ roster: this.places(), playing: [...this.holders()], now })
+  }
+
+  /**
+   * Whether this room believes a match is running and can describe nothing
+   * about it: no layout, and nobody has spoken since it woke to say where the
+   * match had got to. The state a redeploy leaves when it takes everybody with
+   * it. See `remind`.
+   */
+  private forgotten(): boolean {
+    return this.opts.remind === true && this.running && this.laid === null && !this.match.oriented
   }
 
   private holders(): Set<number> {
@@ -552,7 +586,9 @@ export class Room<Who, Settings, Seat> {
       {
         free: this.free(),
         started: this.running,
-        vacant: this.running ? this.match.vacant(this.holders()) : -1,
+        // A forgotten room has no place to give, but it has something to ask:
+        // let them in to watch, and ask them for the match.
+        vacant: this.running ? (this.forgotten() ? 0 : this.match.vacant(this.holders())) : -1,
         build: this.lobby.build,
       },
       { name: arrival.name, build: arrival.build },
@@ -594,6 +630,8 @@ export class Room<Who, Settings, Seat> {
     if (this.running && this.laid !== null) {
       out.push(...this.catchupFor(who, [], false))
       out.push({ kind: 'arrived', who, name })
+    } else if (this.forgotten()) {
+      out.push({ kind: 'forgotten', who })
     }
     out.push({ kind: 'lobby', view: this.view() })
     out.push(this.listing(now))
@@ -962,6 +1000,53 @@ export class Room<Who, Settings, Seat> {
   /** Somebody's fingerprint of a point, and whether it is news. */
   fingerprint(at: At, hash: number): Decision<Who, Settings, Seat>[] {
     return this.prints.offer(at, hash) ? [{ kind: 'disagreed', at }] : []
+  }
+
+  /**
+   * Be told the match again, by somebody who was in it.
+   *
+   * For a room that has forgotten its match (see the `remind` option): the
+   * answer to `forgotten`. It is `adopt` — the same payload a catch-up sends,
+   * validated as strictly — on a room that already knew a match was running
+   * rather than one that never saw it, and then a catch-up for everybody who
+   * is waiting to watch, the reminder included, because the connection that
+   * brought the match is now a latecomer to it like anybody else.
+   *
+   * The seating comes from the host rather than from them. The client holds
+   * the inputs; who sat where is the room's own record and is the host's to
+   * keep — taking it from whoever arrives first would let them rewrite it.
+   *
+   * Somebody else may have got there first. Then this is only a catch-up for
+   * them, if they are watching, and the payload is ignored: the first match
+   * the room was told is the match, and the fingerprints are what notice if
+   * two of them disagreed.
+   */
+  remind(
+    who: Who,
+    match: {
+      readonly seating: Seating<Seat>
+      readonly origin: Origin | null
+      readonly from: At
+      readonly at: At
+      readonly log: readonly (readonly number[])[]
+      readonly handovers: readonly Handover[]
+    },
+    now: number,
+  ): Decision<Who, Settings, Seat>[] {
+    this.wake(now)
+    if (this.forgotten()) {
+      const out = this.adopt({}, match, now)
+      if (out.length === 0) return []
+      for (const m of this.opts.members()) {
+        if (m.players.length === 0) out.push(...this.catchupFor(m.who, [], false))
+      }
+      return out
+    }
+    const mine = this.opts.members().find((m) => m.who === who)
+    if (this.running && this.laid !== null && mine !== undefined && mine.players.length === 0) {
+      return this.catchupFor(who, [], false)
+    }
+    return []
   }
 
   /** Their game came apart and they want it back. */

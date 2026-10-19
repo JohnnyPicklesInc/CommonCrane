@@ -37,6 +37,7 @@ different shapes is not five different rules.
 | `depart(who)` | They are gone. |
 | `restore(state, started)` | A room waking up with its memory written down. |
 | `adopt(state, match, now)` | Become the room, on a machine that was only ever a client of it. Both halves in one call, and validated before anything is touched. |
+| `remind(who, match, now)` | A room that has forgotten its match — a redeploy took the room and everybody in it at once — being told it again by somebody who was in it. Opt in with the `remind` option: arrivals are then let in to watch and announced with `forgotten`, the host asks them for the match (the inputs; the seating is the host's own record), and this adopts it and catches up everybody waiting. Off, a forgotten room turns people away as before. |
 | `refresh(now?)` | The room as it stands, without deciding anything new. |
 | `isHost(who, except?)` | Whether this connection is the one that may propose and begin. |
 
