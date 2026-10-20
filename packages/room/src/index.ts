@@ -20,6 +20,7 @@ export {
   type MatchOptions,
   type BeginOptions,
   type Handover,
+  type Fill,
   type Lineup,
   type Origin,
 } from './match.ts'

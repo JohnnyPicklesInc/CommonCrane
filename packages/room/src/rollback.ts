@@ -359,6 +359,8 @@ export class Rollback<State> {
   /** Record a locally sampled input. Always authoritative for that player. */
   setLocalInput(player: number, at: At, packed: number): void {
     this.since[player] = 0
+    if (this.firstLocal[player] === undefined) this.firstLocal[player] = at
+    if (this.imposed[player]?.has(at) === true) return
     this.real[player]!.set(at, packed)
     if (at > this.lastReal[player]!) {
       this.lastReal[player] = at
@@ -372,6 +374,12 @@ export class Rollback<State> {
    */
   applyRemote(player: number, from: At, packed: readonly number[]): void {
     if (player < 0 || player >= this.opts.players) return
+    // Our own place's input, from the room, is the room settling points we
+    // owed it: nobody else ever sends it. Kept over whatever we sample there.
+    if (this.opts.localPlayers.includes(player)) {
+      const set = (this.imposed[player] ??= new Set())
+      for (let i = 0; i < packed.length; i++) set.add(from + i)
+    }
     let earliest = -1
     /** Whether any of this was news — see the note further down. */
     let moved = false
@@ -649,6 +657,48 @@ export class Rollback<State> {
     return { at: line, data: write(this.ring[slot]!) }
   }
 
+  /**
+   * The newest point of each player's input `outbox` has handed out, or
+   * undefined for a player it has never been asked about.
+   */
+  private readonly sentTo: (At | undefined)[] = []
+  /**
+   * Points of a local player's input the room has written for us — a place we
+   * went quiet in, settled by the room while we were not there (see `Fill`).
+   * What we sample for those points afterwards is not what everybody else
+   * played, so it is not what we play either.
+   */
+  private readonly imposed: Set<At>[] = []
+  /** The first point each player's input was sampled here, so the first run starts there. */
+  private readonly firstLocal: (At | undefined)[] = []
+
+  /**
+   * A local player's input still to go out, and the redundancy every message
+   * carries: everything after the last run this handed out, or the newest
+   * `redundancy` points if that reaches further back, at most `max` of them.
+   *
+   * Not `localRun`, which hands out only the newest `count` and is right only
+   * while a frame plays fewer points than that. A frame can play far more — a
+   * tab coming back from the background, a machine catching up after a stall
+   * plays a few dozen at once — and every point older than the newest `count`
+   * was never sent to anybody. Nobody else could then settle those points, ever:
+   * they wait on input that is not coming, their fingerprints stop, and the
+   * match is only put right by rebuilding it. Asked of this instead, a backlog
+   * goes out oldest first, `max` at a time, until it is gone.
+   */
+  outbox(player: number, redundancy: number, max: number): { from: At; f: number[] } {
+    const end = this.lastReal[player]!
+    const tail = Math.max(0, end - redundancy + 1)
+    const sent = this.sentTo[player]
+    const start = sent === undefined ? (this.firstLocal[player] ?? tail) : sent + 1
+    const from = Math.max(0, Math.min(tail, start))
+    const to = Math.min(end, from + Math.max(1, max) - 1)
+    const f: number[] = []
+    for (let t = from; t <= to; t++) f.push(this.real[player]!.get(t) ?? this.lastValue[player]!)
+    if (to >= from) this.sentTo[player] = Math.max(sent ?? -1, to)
+    return { from, f }
+  }
+
   /** The last `count` inputs for a local player, for the redundancy every message carries. */
   localRun(player: number, count: number): { from: At; f: number[] } {
     const end = this.lastReal[player]!
@@ -910,7 +960,14 @@ export class Rollback<State> {
     if (ring <= 0) return
     const keepReal = Math.min(ring, this.confirmed())
     for (let p = 0; p < this.opts.players; p++) {
-      for (const k of this.real[p]!.keys()) if (k < keepReal) this.real[p]!.delete(k)
+      // Nor what is still owed to the room, while it is ours to send: see
+      // `outbox`. Only while local, or a place given up would keep everything
+      // after the last run it sent for the rest of the match.
+      const sent = this.opts.localPlayers.includes(p) ? this.sentTo[p] : undefined
+      const keep = sent === undefined ? keepReal : Math.min(keepReal, sent + 1)
+      for (const k of this.real[p]!.keys()) if (k < keep) this.real[p]!.delete(k)
+      const imposed = this.imposed[p]
+      if (imposed !== undefined) for (const k of imposed) if (k < ring) imposed.delete(k)
       for (const k of this.used[p]!.keys()) if (k < ring) this.used[p]!.delete(k)
     }
     for (const k of this.hashAt.keys()) if (k < this.nextHash) this.hashAt.delete(k)

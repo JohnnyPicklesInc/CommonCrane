@@ -55,6 +55,29 @@ export interface Handover {
   readonly on: boolean
 }
 
+/**
+ * Input written for somebody who has gone, over the points between the last
+ * thing they said and the point their place went to the computer.
+ *
+ * Nobody else can speak for those points. Before this existed nobody did: the
+ * place went automatic a window after their last word, so that peers already
+ * running ahead on a guess could still reach the change, and every peer then
+ * waited for the points in between for ever. Nothing settled, no fingerprint
+ * was taken, and the match was only put right by rebuilding everybody in it.
+ *
+ * Sent to everybody as input, and written into the log, so a latecomer replays
+ * the same. The value is the log's own carry-forward — what a replay of the log
+ * already reads for a hole — so a latecomer from before and after agree.
+ */
+export interface Fill {
+  readonly player: number
+  readonly from: At
+  readonly run: readonly number[]
+}
+
+/** What a replay of the log reads for a place that has never said anything. */
+const SILENT = 0
+
 export interface MatchOptions {
   /** The most players the room could ever hold. */
   readonly players: number
@@ -122,6 +145,10 @@ export class Match {
   private pending: Origin | null = null
   private running = false
   private knowsWhere = false
+  /** Places whose player has gone, and the last point owed a stand-in. See `Fill`. */
+  private readonly owed = new Map<number, At>()
+  /** The last point written as a stand-in for each place: final, whatever arrives later. */
+  private readonly sealed = new Map<number, At>()
 
   constructor(opts: MatchOptions) {
     this.opts = opts
@@ -202,6 +229,8 @@ export class Match {
     this.contributions.clear()
     this.presence.clear()
     this.decisions.clear()
+    this.owed.clear()
+    this.sealed.clear()
     this.automatic.fill(false)
     // The spare places are driven automatically from the first point. The room
     // has to know it, and not only the simulation: otherwise the schedule dates
@@ -320,6 +349,8 @@ export class Match {
     // improvement on nothing and could cut the log back to a point behind where
     // it already begins.
     this.pending = o.origin
+    this.owed.clear()
+    this.sealed.clear()
     this.contributions = new ContributionLog<number>({
       players: this.opts.players,
       origin: o.from,
@@ -346,6 +377,8 @@ export class Match {
 
   /** Give the match back. A room being recycled for a fresh one. */
   end(): void {
+    this.owed.clear()
+    this.sealed.clear()
     this.running = false
     this.start = null
     this.pending = null
@@ -423,7 +456,18 @@ export class Match {
     if (!this.oriented) return []
     const change = this.presence.look(held, now)
     const out: Handover[] = []
-    for (const p of change.quiet) if (!this.automatic[p]) out.push(this.drive(p, true, now))
+    for (const p of change.quiet) {
+      if (this.automatic[p]) continue
+      out.push(this.drive(p, true, now))
+      // The points between their last word and the change are owed now, not
+      // whenever their input turns up. Everybody else is about to stop waiting
+      // for it and run on a guess, and input that arrives once they are further
+      // on than they can rewind is input nobody can use: the match splits on
+      // it. A laptop shut for a minute sends exactly that the moment it opens.
+      // So the room settles those few points for them, as it would for
+      // somebody who had gone, and they replay what everybody else played.
+      this.seal(p)
+    }
     for (const p of change.back) if (this.automatic[p]) out.push(this.drive(p, false, now))
     return out
   }
@@ -435,6 +479,61 @@ export class Match {
     // after the silence elapsed, and that is time everybody left spends stopped
     // for somebody who has closed their tab.
     return [this.drive(player, true, now)]
+  }
+
+  /**
+   * This place's player has gone for good: owe a stand-in for the points
+   * between their last word and their place going to the computer. Paid by
+   * `takeFills`, as far as the match has got. See `Fill`.
+   *
+   * After `leave`, after going quiet (see `observe`), or for a place the
+   * computer already had because they went quiet first — the same gap, left by
+   * the same silence.
+   */
+  seal(player: number): void {
+    if (!this.running || !this.oriented || player < 0 || !this.automatic[player]) return
+    let took = -1
+    for (const d of this.decisions.all()) if (d.body.p === player && d.body.on) took = d.body.at
+    const to = took - 1
+    if (to > this.contributions.lastFrom(player)) this.owed.set(player, to)
+  }
+
+  /**
+   * Whatever stand-ins are now due, written into the log.
+   *
+   * Never past the newest point anybody has really spoken for. A stand-in out
+   * there would be the newest input a peer holds for a place its game still has
+   * a person in, and peers run to catch up with the newest input they hold.
+   */
+  takeFills(): Fill[] {
+    const out: Fill[] = []
+    for (const [player, to] of this.owed) {
+      const from = this.contributions.lastFrom(player) + 1
+      const upto = Math.min(to, this.contributions.head)
+      if (upto >= from) {
+        const v = this.contributions.carried(player, from - 1, SILENT)
+        const run = new Array<number>(upto - from + 1).fill(v)
+        this.contributions.record(player, from, run)
+        this.sealed.set(player, upto)
+        out.push({ player, from, run })
+      }
+      if (upto >= to || from > to) this.owed.delete(player)
+    }
+    return out
+  }
+
+  /**
+   * A run as the room will take it: whatever falls on a point already written
+   * as a stand-in reads as the stand-in. Late input from somebody who was
+   * given up on — a connection that comes back for its place — cannot rewrite
+   * points everybody has already settled on.
+   */
+  settle(player: number, from: At, run: readonly number[]): readonly number[] {
+    const sealed = this.sealed.get(player)
+    if (sealed === undefined || from > sealed) return run
+    return run.map((v, i) =>
+      from + i <= sealed ? this.contributions.carried(player, from + i, SILENT) : v,
+    )
   }
 
   /** A place nobody holds, or -1. What a latecomer can be given. */
@@ -574,7 +673,7 @@ export class Match {
       origin: this.start,
       from: this.contributions.origin,
       at: this.contributions.head,
-      log: this.contributions.rectangle(0).slice(0, this.roster),
+      log: this.contributions.rectangle(SILENT).slice(0, this.roster),
       handovers: this.decisions.all().map((d) => d.body),
     }
   }

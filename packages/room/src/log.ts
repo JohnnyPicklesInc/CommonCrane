@@ -58,6 +58,25 @@ export class ContributionLog<C = number> {
   }
 
   /**
+   * What a replay of this log reads for one player at one point: what they
+   * said there, or else the last thing they said before it, or else `fill`.
+   *
+   * The same carry-forward `rectangle` does, one cell at a time. Whatever is
+   * written to stand in for somebody who said nothing has to be exactly this,
+   * or a latecomer replaying the log and a client that was sent the stand-in
+   * play two different matches.
+   */
+  carried(player: number, at: At, fill: C): C {
+    const row = this.rows[player]
+    if (row === undefined) return fill
+    for (let i = Math.min(at - this.origin, row.length - 1); i >= 0; i--) {
+      const v = row[i]
+      if (v !== undefined) return v
+    }
+    return fill
+  }
+
+  /**
    * Record a run of contributions from one player, oldest first.
    *
    * Runs overlap on purpose — every message carries the last couple of dozen

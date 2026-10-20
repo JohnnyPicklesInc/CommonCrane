@@ -29,7 +29,7 @@
 
 import { Fingerprints } from './fingerprints.ts'
 import { Lobby, type Check, type LobbyState, type LobbyView } from './lobby.ts'
-import { Match, type Handover, type Origin } from './match.ts'
+import { Match, type Fill, type Handover, type Origin } from './match.ts'
 import { admit } from './door.ts'
 import { freeChairs, hostChair, resizeChairs, type Seated } from './seating.ts'
 import type { At } from './log.ts'
@@ -100,6 +100,12 @@ export type Decision<Who, Settings, Seat> =
   | { readonly kind: 'begun'; readonly seating: Seating<Seat> }
   /** Places changing hands, each dated to a point everybody can still reach. */
   | { readonly kind: 'handovers'; readonly changes: readonly Handover[] }
+  /**
+   * Input written for somebody who has gone, for the points nobody else could
+   * speak for. Send it to everybody exactly as you would their own input. See
+   * `Fill`.
+   */
+  | { readonly kind: 'filled'; readonly fills: readonly Fill[] }
   /** A whole assignment, applied by everybody on one point. */
   | { readonly kind: 'lineup'; readonly at: At; readonly driving: readonly number[] }
   /** One connection now speaks for this place, from this point. -1 for none. */
@@ -848,11 +854,19 @@ export class Room<Who, Settings, Seat> {
   claim(who: Who, player: number, from: At, run: readonly number[]): readonly number[] | null {
     const mine = this.opts.members().find((m) => m.who === who)
     if (mine === undefined) return null
-    if (mine.players.includes(player)) return run
+    // Points already written for somebody who had gone read as what was
+    // written, whoever sends them now: see `Match.settle`.
+    if (mine.players.includes(player)) return this.match.settle(player, from, run)
     const gave = this.giving.get(player)
     if (gave === undefined || gave.who !== who) return null
     const keep = gave.until - from
-    return keep > 0 ? run.slice(0, keep) : null
+    return keep > 0 ? this.match.settle(player, from, run.slice(0, keep)) : null
+  }
+
+  /** Whatever stand-ins for somebody gone are now due, as a decision. See `Fill`. */
+  private fills(): Decision<Who, Settings, Seat>[] {
+    const fills = this.match.takeFills()
+    return fills.length > 0 ? [{ kind: 'filled', fills }] : []
   }
 
   /** A run of input from somebody, and whatever the clock makes of it. */
@@ -860,18 +874,21 @@ export class Room<Who, Settings, Seat> {
     this.wake(now)
     const claimed = this.claim(who, player, from, run)
     if (claimed === null) return []
-    if (claimed !== run) {
+    const holds = this.opts.members().find((m) => m.who === who)?.players.includes(player) === true
+    if (!holds) {
       // The tail of a place given up: recorded, so a catchup replays what was
       // really pressed, and nothing more. It is not somebody speaking again,
       // which would hand them back the place they have just left.
       this.match.record(player, from, claimed)
-      return []
+      return this.fills()
     }
     const out: Decision<Who, Settings, Seat>[] = []
-    const changes = this.match.contribute(player, from, run, now) ?? []
+    const changes = this.match.contribute(player, from, claimed, now) ?? []
     if (changes.length > 0) out.push({ kind: 'handovers', changes })
     const quiet = this.match.observe(this.holders(), now)
     if (quiet.length > 0) out.push({ kind: 'handovers', changes: quiet })
+    // The newest point may have moved, and with it what is owed somebody gone.
+    out.push(...this.fills())
     return out
   }
 
@@ -900,7 +917,7 @@ export class Room<Who, Settings, Seat> {
     // Somebody coming back is news, and waiting for the next beat to say so
     // leaves them watching the computer play their place for another second.
     const changes = this.match.observe(this.holders(), now)
-    return changes.length > 0 ? [{ kind: 'handovers', changes }] : []
+    return [...(changes.length > 0 ? [{ kind: 'handovers', changes } as const] : []), ...this.fills()]
   }
 
   /**
@@ -980,6 +997,7 @@ export class Room<Who, Settings, Seat> {
     if (this.running) {
       const quiet = this.match.observe(this.holders(), now)
       if (quiet.length > 0) out.push({ kind: 'handovers', changes: quiet })
+      out.push(...this.fills())
     }
     const listed = this.worthSaying(now)
     if (listed !== null) out.push(listed)
@@ -1158,8 +1176,11 @@ export class Room<Who, Settings, Seat> {
       for (const p of gone.players) {
         if (p < 0 || p >= this.places()) continue
         changes.push(...this.match.leave(p, now))
+        // Gone, so nothing will ever be said for the points before the change.
+        this.match.seal(p)
       }
       if (changes.length > 0) out.push({ kind: 'handovers', changes })
+      out.push(...this.fills())
     }
     const remaining = this.opts.members().filter((m) => m.who !== who)
     if (remaining.length === 0) {
