@@ -145,8 +145,12 @@ export class Match {
   private pending: Origin | null = null
   private running = false
   private knowsWhere = false
-  /** Places whose player has gone, and the last point owed a stand-in. See `Fill`. */
-  private readonly owed = new Map<number, At>()
+  /**
+   * Places whose player has gone, and the points owed a stand-in: from where the
+   * place was last given to them to just before it went to the computer. See
+   * `Fill`.
+   */
+  private readonly owed = new Map<number, { from: At; to: At }>()
   /** The last point written as a stand-in for each place: final, whatever arrives later. */
   private readonly sealed = new Map<number, At>()
 
@@ -492,10 +496,22 @@ export class Match {
    */
   seal(player: number): void {
     if (!this.running || !this.oriented || player < 0 || !this.automatic[player]) return
+    // The last time it went to the computer, and the last time before that it
+    // was given to somebody. Points before the giving were the computer's, and
+    // nobody owes anything for those.
     let took = -1
-    for (const d of this.decisions.all()) if (d.body.p === player && d.body.on) took = d.body.at
+    let given = this.contributions.origin
+    let last = this.contributions.origin
+    for (const d of this.decisions.all()) {
+      if (d.body.p !== player) continue
+      if (!d.body.on) last = d.body.at
+      else {
+        took = d.body.at
+        given = last
+      }
+    }
     const to = took - 1
-    if (to > this.contributions.lastFrom(player)) this.owed.set(player, to)
+    if (to > this.contributions.lastFrom(player)) this.owed.set(player, { from: given, to })
   }
 
   /**
@@ -507,8 +523,8 @@ export class Match {
    */
   takeFills(): Fill[] {
     const out: Fill[] = []
-    for (const [player, to] of this.owed) {
-      const from = this.contributions.lastFrom(player) + 1
+    for (const [player, { from: given, to }] of this.owed) {
+      const from = Math.max(given, this.contributions.lastFrom(player) + 1)
       const upto = Math.min(to, this.contributions.head)
       if (upto >= from) {
         const v = this.contributions.carried(player, from - 1, SILENT)

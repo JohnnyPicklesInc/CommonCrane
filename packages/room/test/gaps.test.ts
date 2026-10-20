@@ -255,3 +255,23 @@ describe('a machine that went quiet', () => {
     expect(run.f[0]).toBe(9)
   })
 })
+
+describe('a place somebody took late and left', () => {
+  it('is owed nothing for the points the computer had it before them', () => {
+    const START = 100_000
+    const m = new Match({ players: 4, clock: rollbackClock({ window: WINDOW, slack: 4 }), silenceMs: 4000 })
+    m.begin({ roster: 3, playing: [0], now: START })
+    for (let t = 0; t <= 99; t++) m.contribute(0, t, [1], START)
+    const seated = m.seat(2, START)
+    for (let t = 100; t <= seated.at + 5; t++) m.contribute(0, t, [1], START)
+    m.leave(2, START)
+    m.seal(2)
+    const fills: { from: number; n: number }[] = []
+    for (let t = seated.at + 6; t < seated.at + 60; t++) {
+      m.contribute(0, t, [1], START)
+      for (const f of m.takeFills()) fills.push({ from: f.from, n: f.run.length })
+    }
+    expect(fills.length).toBeGreaterThan(0)
+    expect(fills[0]!.from).toBe(seated.at)
+  })
+})
