@@ -34,8 +34,10 @@ if (!bump) {
   process.exit(2)
 }
 
+// npm is `npm.cmd` on Windows, which only a shell will run. Nothing passed to
+// it here has a space or a quote in it, so the shell has nothing to mangle.
 const sh = (cmd, cmdArgs, opts = {}) =>
-  execFileSync(cmd, cmdArgs, { cwd: root, encoding: 'utf8', ...opts })
+  execFileSync(cmd, cmdArgs, { cwd: root, encoding: 'utf8', shell: cmd === 'npm' && process.platform === 'win32', ...opts })
 
 /** A release names a commit, so refuse to cut one from a tree nobody can name. */
 const dirty = sh('git', ['status', '--porcelain']).trim()

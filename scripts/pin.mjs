@@ -77,7 +77,8 @@ if (dryRun) process.exit(0)
 // than either, so install rather than leaving it to be noticed later.
 for (const { repo, name } of touched) {
   console.log(`\n── ${name} · npm install ─────────────────────────`)
-  execFileSync('npm', ['install'], { cwd: repo, stdio: 'inherit' })
+  // `npm.cmd` on Windows, which only a shell will run.
+  execFileSync('npm', ['install'], { cwd: repo, stdio: 'inherit', shell: process.platform === 'win32' })
 }
 
 console.log(`\n${touched.length} repo(s) now on ${pkgName} ${version}.`)
