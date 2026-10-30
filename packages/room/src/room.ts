@@ -226,6 +226,17 @@ export interface RoomOptions<Who, Settings, Seat> {
    * which is worse than being turned away.
    */
   readonly remind?: boolean
+  /**
+   * Let the host start a match nobody has sat down in.
+   *
+   * Every place is then one nobody speaks for, and everybody in the room is a
+   * watcher from the drop — which a game whose places play themselves (an AI
+   * on each side) can show as a match to watch, and step people into later.
+   *
+   * Off unless asked for, because a game whose places stand still without a
+   * player would start a match of nothing, and refusing is the better answer.
+   */
+  readonly emptyMatch?: boolean
   readonly settings: Settings
   readonly checkSettings: Check<Settings>
   readonly checkSeat: Check<Seat>
@@ -727,7 +738,7 @@ export class Room<Who, Settings, Seat> {
         taken.push({ chair, name: this.nameOf(m.name, i), seat, who: m.who })
       }
     }
-    if (taken.length === 0) return null
+    if (taken.length === 0 && this.opts.emptyMatch !== true) return null
     taken.sort((a, b) => a.chair - b.chair)
     const dealt: { who: Who; players: number[] }[] = []
     for (const m of this.opts.members()) {

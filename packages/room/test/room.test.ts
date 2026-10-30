@@ -17,11 +17,12 @@ const CAPACITY = 6
 const ROSTER = 6
 
 /** A room whose membership is a plain array the test moves about. */
-function room(opts: { emptyMs?: number; remind?: boolean } = {}) {
+function room(opts: { emptyMs?: number; remind?: boolean; emptyMatch?: boolean } = {}) {
   const members: Member<string, Seat>[] = []
   const r = new Room<string, Settings, Seat>({
     ...(opts.emptyMs === undefined ? {} : { emptyMs: opts.emptyMs }),
     ...(opts.remind === undefined ? {} : { remind: opts.remind }),
+    ...(opts.emptyMatch === undefined ? {} : { emptyMatch: opts.emptyMatch }),
     capacity: CAPACITY,
     roster: ROSTER,
     clock: rollbackClock({ window: WINDOW, slack: 4 }),
@@ -215,6 +216,30 @@ describe('the drop', () => {
     sit('Alice', [0]); sit('Bob', [1])
     expect(r.begin('Bob', 2, 0)).toEqual([])
     expect(r.started).toBe(false)
+  })
+
+  it('is refused with nobody sat down, unless the game asked for that', () => {
+    const { r, join } = room()
+    join('Alice'); join('Bob')
+    expect(r.begin('Alice', 2, 0)).toEqual([])
+    expect(r.started).toBe(false)
+  })
+
+  it('starts with nobody sat down when the game asked for that, everybody watching', () => {
+    // A game whose places play themselves: the AI on both sides, and the room
+    // watching it. Asked for by the game, so one whose places would stand
+    // still is never handed a match of nothing.
+    const { r, join, sit, deal } = room({ emptyMatch: true })
+    join('Alice'); join('Bob')
+    sit('Bob', [-1 as Seat])
+    const out = deal(r.begin('Alice', 4, 0))
+    const begun = find(out, 'begun')!
+    expect(r.started).toBe(true)
+    expect(begun.seating.places).toBe(4)
+    expect(begun.seating.chairs).toEqual([])
+    expect(begun.seating.dealt.map((d) => d.players)).toEqual([[], []])
+    // And nobody being quiet in it is nothing to act on: there is nobody to retire.
+    expect(r.tick(SILENCE * 3).filter((d) => d.kind === 'handovers')).toEqual([])
   })
 
   it('counts everybody as present, so nobody is retired on the first point', () => {
