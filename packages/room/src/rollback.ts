@@ -716,13 +716,30 @@ export class Rollback<State> {
   }
 
   private remoteLead(): At {
-    let lead = -1
+    let lead = this.due
     for (let p = 0; p < this.opts.players; p++) {
       if (this.opts.localPlayers.includes(p)) continue
       if (!this.sim.holds(this.state, p)) continue
       if (this.lastReal[p]! > lead) lead = this.lastReal[p]!
     }
     return lead
+  }
+
+  /** A point this machine has been told the match has reached. See `closeUpTo`. */
+  private due: At = -1
+
+  /**
+   * The match has got at least as far as `at`: close up to it.
+   *
+   * A machine closes up to the newest input it holds from somebody else, and
+   * that is all it has to go by. With nobody driving there is no such input, so
+   * a machine that arrived behind stays behind — which nobody notices until it
+   * is given a place from a point the room dated by somebody further on, and
+   * everybody else stops at that point to wait while it walks there in real
+   * time. The game hears the point first and says so here.
+   */
+  closeUpTo(at: At): void {
+    if (at > this.due) this.due = at
   }
 
   /**

@@ -294,6 +294,29 @@ function playTo(r: ReturnType<typeof engine>, local: number, to: number, each?: 
   }
 }
 
+describe('a machine behind a match nobody is driving', () => {
+  it('stays where it is, since nothing it holds says the match is further on', () => {
+    const r = engine(2, [])
+    r.handover(0, 0, true)
+    r.handover(1, 0, true)
+    for (let i = 0; i < 50; i++) r.advance(16, () => {})
+    expect(r.at).toBe(50)
+  })
+
+  it('closes up to a point it is told the match has reached, and no further', () => {
+    const r = engine(2, [])
+    r.handover(0, 0, true)
+    r.handover(1, 0, true)
+    for (let i = 0; i < 50; i++) r.advance(16, () => {})
+    r.closeUpTo(1000)
+    for (let i = 0; i < 30; i++) r.advance(16, () => {})
+    // Forty extra a frame until it is within the slack, then one a frame.
+    expect(r.at).toBeGreaterThanOrEqual(998)
+    expect(r.at).toBeLessThanOrEqual(1010)
+    expect(r.stalled).toBe(false)
+  })
+})
+
 describe('who was driving, on a machine that heard it late', () => {
   it('plays the stretch between a handover and a hand-back on the computer, however late both are heard', () => {
     // The room hands place 1 to the computer at 50 and back at 150. One machine
