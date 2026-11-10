@@ -375,6 +375,43 @@ describe('fingerprints after a catch-up', () => {
   })
 })
 
+describe('arriving on a world taken after a place changed hands', () => {
+  // The room cuts its log back to a world the host sent, and a latecomer or a
+  // repair starts from that. Place 0 went to the computer at 70; the world is
+  // from 240, so it already has the computer in it.
+  const world = (driving0: boolean) => [240, 240, driving0 ? 1 : 0, 1]
+  const rows = () => [new Array(60).fill(1), new Array(60).fill(1)]
+  const play = (r: ReturnType<typeof engine>, to: number) => {
+    while (r.at < to) {
+      r.setLocalInput(1, r.at, 1)
+      r.advance(16, () => {})
+    }
+  }
+
+  it('goes on settling: nothing is owed for a place the computer already had', () => {
+    const r = engine(2, [1])
+    r.catchUp(rows(), 299, [{ p: 0, at: 70, on: true }], { at: 240, data: world(false) })
+    play(r, 600)
+    expect(r.confirmed()).toBe(599)
+    expect(r.takeConfirmedHash()).not.toBeNull()
+  })
+
+  it('still waits on a place that was given back before that world', () => {
+    const r = engine(2, [1], 0)
+    r.catchUp(
+      rows(),
+      299,
+      [
+        { p: 0, at: 70, on: true },
+        { p: 0, at: 190, on: false },
+      ],
+      { at: 240, data: world(true) },
+    )
+    play(r, 600)
+    expect(r.confirmed()).toBe(299)
+  })
+})
+
 describe('fingerprints on a machine that was stalled', () => {
   it('does not skip the checkpoints it has not played yet when the line runs ahead of it', () => {
     // Place 1 is ours. Handed away at 50 and back at 650, both heard before

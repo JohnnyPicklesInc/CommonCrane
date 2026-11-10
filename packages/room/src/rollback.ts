@@ -923,7 +923,19 @@ export class Rollback<State> {
     // Decisions already baked into the world we restored are not replayed:
     // re-applying them from a point we are past would be re-deciding a question
     // the state already answers.
-    while (i < order.length && order[i]!.at < this.at) i++
+    //
+    // The line is not in that world, though, and has to be told all the same.
+    // Skipped whole, a place given to the computer before the world was taken
+    // was still owed input by this machine's reckoning — input nobody was ever
+    // going to send — so nothing settled here again, and a repair, which
+    // arrives by this same door, left the machine exactly as unsettled as the
+    // one it replaced.
+    while (i < order.length && order[i]!.at < this.at) {
+      const h = order[i]!
+      if (h.on) this.water.released(h.p, h.at)
+      else this.water.reclaimed(h.p, h.at)
+      i++
+    }
     while (this.at <= to) {
       while (i < order.length && order[i]!.at <= this.at) {
         const h = order[i]!
