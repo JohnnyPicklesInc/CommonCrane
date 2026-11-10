@@ -618,7 +618,7 @@ export class Rollback<State> {
 
   /** The newest point every player's real input is known for. Nothing at or before it can move. */
   confirmed(): At {
-    return this.water.line((p, t) => this.real[p]!.has(t))
+    return this.water.line((p, t) => this.real[p]!.has(t), this.at - 1)
   }
 
   /**

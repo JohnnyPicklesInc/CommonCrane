@@ -106,8 +106,13 @@ export class Watermark {
    * ends then publish fingerprints for states that could never agree and report
    * a desync no amount of waiting resolves. A phone changing masts loses runs
    * often enough to hit this again and again.
+   *
+   * `idle` is the answer with nobody being read at all — a match the computer
+   * is playing both sides of. Nothing is missing there, so the caller says how
+   * far it has played. It was -1, which is "nothing has settled yet", and a
+   * room everybody was watching was taken for one that had stopped settling.
    */
-  line(holds: (player: number, at: At) => boolean): At {
+  line(holds: (player: number, at: At) => boolean, idle: At = -1): At {
     let low = Infinity
     for (let p = 0; p < this.players; p++) {
       let c = this.through[p]!
@@ -121,7 +126,7 @@ export class Watermark {
       if (r >= 0 && c >= r - 1) continue
       if (c < low) low = c
     }
-    return low === Infinity ? -1 : low
+    return low === Infinity ? idle : low
   }
 
   /** Forget everything. A fresh game in the same room. */

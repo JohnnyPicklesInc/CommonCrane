@@ -126,3 +126,13 @@ describe('a place told twice that it is not read', () => {
     expect(w.line(s.holds)).toBe(99)
   })
 })
+
+describe('nobody being read at all', () => {
+  it('is as settled as the caller says it has played', () => {
+    // Both sides the computer's. Nothing is missing, and "nothing settled yet"
+    // was the wrong answer to give for it.
+    const w = new Watermark({ players: 2, absent: [0, 1] })
+    expect(w.line(() => false, 41)).toBe(41)
+    expect(w.line(() => false)).toBe(-1)
+  })
+})
