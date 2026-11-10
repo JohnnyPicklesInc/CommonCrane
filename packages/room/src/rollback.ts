@@ -457,9 +457,16 @@ export class Rollback<State> {
     // The path that never told the watermark anything. A whole seating says who
     // is driving as surely as a single handover does, and a player left out of
     // it has stopped being read from `at` — which is the fact the line needs.
+    //
+    // Only for whoever it changes. Most of a seating is people staying where
+    // they are: somebody driving before it and after it has no gap in what
+    // they owe, and called reclaimed, the input of theirs still on the wire
+    // from before `at` was walked past as never owed — a fingerprint taken on
+    // a guess. And a place that was nobody's and still is has nothing new to
+    // be released from.
     for (let p = 0; p < this.opts.players; p++) {
-      if (driving.includes(p)) this.water.reclaimed(p, at)
-      else this.water.released(p, at)
+      if (!driving.includes(p)) this.water.released(p, at)
+      else if (this.water.isReleased(p)) this.water.reclaimed(p, at)
     }
     if (at < this.at) this.rewindTo(at)
   }

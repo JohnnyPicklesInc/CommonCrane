@@ -101,3 +101,28 @@ describe('a place given back', () => {
     expect(w.line(s.holds)).toBe(45)
   })
 })
+
+describe('a place told twice that it is not read', () => {
+  it('stopped when it first stopped', () => {
+    // A seat nobody ever sat in, and then a whole seating that leaves it empty
+    // still. Dated on to the seating, it was owed input from the opening point
+    // to there — input nobody was ever going to send — and the line sat at -1
+    // for the rest of the match.
+    const w = new Watermark({ players: 2, absent: [1] })
+    const s = store()
+    for (let t = 0; t <= 99; t++) s.put(0, t)
+    w.released(1, 60)
+    expect(w.line(s.holds)).toBe(99)
+  })
+
+  it('is moved back by an earlier point, which is when it really stopped', () => {
+    const w = new Watermark({ players: 2 })
+    const s = store()
+    for (let t = 0; t <= 99; t++) s.put(0, t)
+    for (let t = 0; t <= 19; t++) s.put(1, t)
+    w.released(1, 60)
+    expect(w.line(s.holds)).toBe(19)
+    w.released(1, 20)
+    expect(w.line(s.holds)).toBe(99)
+  })
+})

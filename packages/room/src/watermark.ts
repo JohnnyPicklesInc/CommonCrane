@@ -55,7 +55,18 @@ export class Watermark {
    */
   released(player: number, at: At): void {
     if (player < 0 || player >= this.players) return
+    // Already not being read by then: they stopped when they stopped, and
+    // being told again later does not make the points in between theirs. Moved
+    // on to the later point, a place nobody ever sat in was owed input from
+    // the start of the match up to it, and the line stayed at -1 for good.
+    const was = this.releasedAt[player]!
+    if (was >= 0 && was <= at) return
     this.releasedAt[player] = at
+  }
+
+  /** Whether this player's input is, as last said, not being read. */
+  isReleased(player: number): boolean {
+    return (this.releasedAt[player] ?? -1) >= 0
   }
 
   /** And starts being read again from `at`. */

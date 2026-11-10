@@ -369,3 +369,37 @@ describe('fingerprints on a machine that was stalled', () => {
     expect(got.slice(0, 10)).toEqual([60, 120, 180, 240, 300, 360, 420, 480, 540, 600])
   })
 })
+
+describe('the line after a whole assignment', () => {
+  it('goes on settling when a place that was nobody\'s is left nobody\'s', () => {
+    // One player at one machine, and five places the computer has had from the
+    // start. They open the seating panel and shut it: the same seating, said
+    // again. Every empty place was released afresh from that point, owed input
+    // back to the opening one, and nothing settled for the rest of the match.
+    const r = engine(2, [0])
+    r.handover(1, 0, true)
+    const play = (to: number) => {
+      while (r.at < to) r.advance(16, (p, at) => r.setLocalInput(p, at, 1))
+    }
+    play(200)
+    expect(r.confirmed()).toBeGreaterThan(190)
+    r.lineup(r.at, [0], [0])
+    play(400)
+    expect(r.confirmed()).toBeGreaterThan(390)
+  })
+
+  it('still owes what somebody who stays in their place had yet to send', () => {
+    // Place 1 is driven before the seating and after it, and its input is the
+    // usual few points behind. Called reclaimed, those points were walked past
+    // as never owed, and a fingerprint was taken on a guess at them.
+    const r = engine(2, [0])
+    playTo(r, 0, 100)
+    for (let k = 0; k < 6; k++) {
+      r.setLocalInput(0, r.at, 1)
+      r.advance(16, () => {})
+    }
+    expect(r.confirmed()).toBe(99)
+    r.lineup(r.at, [0, 1], [0, 1])
+    expect(r.confirmed()).toBe(99)
+  })
+})
