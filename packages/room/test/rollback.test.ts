@@ -481,3 +481,49 @@ describe('the line after a whole assignment', () => {
     expect(r.confirmed()).toBe(99)
   })
 })
+
+describe('how far back a rewind reaches', () => {
+  /** Carrying on at once without anybody who goes quiet, keeping `history` points. */
+  function eager(history?: number) {
+    return new Rollback<Toy>({
+      patienceMs: 0,
+      history,
+      sim: toy(2),
+      players: 2,
+      localPlayers: [0],
+      window: WINDOW,
+      tickMs: 16,
+      idle: 0,
+      hashEvery: 60,
+      snapshotEvery: 300,
+      catchupSlack: 2,
+      catchupPerFrame: 40,
+    })
+  }
+
+  /** Player 1 heard to point 20, quiet until point 120, then all of it at once: twos, where the guess was ones. */
+  function late(r: ReturnType<typeof eager>): void {
+    for (let t = 0; t < 120; t++) {
+      if (t <= 20) r.applyRemote(1, t, [1])
+      r.setLocalInput(0, t, 1)
+      r.advance(16, () => {})
+    }
+    r.applyRemote(1, 21, new Array<number>(r.at - 21).fill(2))
+  }
+
+  /** The total had every point been played with the input on time. */
+  const onTime = (r: ReturnType<typeof eager>): number => r.at + 21 + 2 * (r.at - 21)
+
+  it('cannot reach a correction older than the window allows by default', () => {
+    const r = eager()
+    late(r)
+    expect(r.state.sum).not.toBe(onTime(r))
+  })
+
+  it('puts it right with the history to reach it', () => {
+    const r = eager(200)
+    late(r)
+    expect(r.staleCorrections).toBe(0)
+    expect(r.state.sum).toBe(onTime(r))
+  })
+})

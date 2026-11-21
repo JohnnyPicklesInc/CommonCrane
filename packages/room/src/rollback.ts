@@ -121,6 +121,11 @@ export interface RollbackOptions<State> {
   readonly absent?: number[]
   /** How far ahead of confirmed remote input we will run before stopping. */
   readonly window: number
+  /**
+   * How many points back a rewind can reach: a state is kept for each. At
+   * least `window * 3`, which is what it is when not given.
+   */
+  readonly history?: number
   /** Wall-clock milliseconds per point. */
   readonly tickMs: number
   /** The packed input meaning "nothing", used before anybody has spoken. */
@@ -145,7 +150,7 @@ export interface RollbackOptions<State> {
    * qualifier was missing here for a long time. The simulation goes on
    * predicting that place exactly as before, and when their input arrives it is
    * a rewind like any other — but only if there is still a state kept from the
-   * point being corrected. Past `window * 3` points there is not: the
+   * point being corrected. Past the ring (`history`) there is not: the
    * correction is dropped, this machine keeps a world built on a guess nobody
    * else made, and only a fingerprint will ever say so.
    *
@@ -306,7 +311,7 @@ export class Rollback<State> {
   constructor(opts: RollbackOptions<State>) {
     this.opts = opts
     this.sim = opts.sim
-    this.ringSize = opts.window * 3
+    this.ringSize = Math.max(opts.window * 3, Math.floor(opts.history ?? 0))
     this.nextHash = opts.hashEvery
     this.state = this.sim.create()
     this.prev = this.sim.clone(this.state)
@@ -487,8 +492,8 @@ export class Rollback<State> {
       // The stall guard is what should prevent it — a client may not run more
       // than `window` ahead of a peer's confirmed input — but `patienceMs` is
       // the deliberate exception, and giving up on a peer for longer than the
-      // ring is exactly how their input comes back unusable. Patience above
-      // `window * 3` ticks is patience that can cost a match.
+      // ring is exactly how their input comes back unusable. Patience longer
+      // than the ring is patience that can cost a match.
       this.staleCorrections++
       return
     }
