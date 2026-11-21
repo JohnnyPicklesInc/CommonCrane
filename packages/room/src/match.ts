@@ -539,6 +539,39 @@ export class Match {
   }
 
   /**
+   * Stand-ins for the people holding a place whose input is more than `late`
+   * points behind the newest anybody has spoken for: from their last word to
+   * `late` short of the newest, at what they last said, which is what every
+   * peer has been guessing for them. Written into the log and final: input of
+   * theirs for those points that arrives later reads as the stand-in (see
+   * `settle`). The place stays theirs. Nothing for a place the computer is
+   * driving, or for somebody who has not spoken since it was given to them.
+   */
+  takeLateFills(held: Iterable<number>, late: number): Fill[] {
+    if (!this.running || !this.oriented) return []
+    const out: Fill[] = []
+    const upto = this.contributions.head - late
+    for (const player of held) {
+      if (player < 0 || player >= this.roster || this.automatic[player]) continue
+      const last = this.contributions.lastFrom(player)
+      if (upto <= last || last < this.givenAt(player)) continue
+      const from = last + 1
+      const run = new Array<number>(upto - from + 1).fill(this.contributions.carried(player, last, SILENT))
+      this.contributions.record(player, from, run)
+      this.sealed.set(player, Math.max(this.sealed.get(player) ?? upto, upto))
+      out.push({ player, from, run })
+    }
+    return out
+  }
+
+  /** The point a place was last given to a person: its last hand-back, or the start of the log. */
+  private givenAt(player: number): At {
+    let given = this.contributions.origin
+    for (const d of this.decisions.all()) if (d.body.p === player && !d.body.on) given = d.body.at
+    return given
+  }
+
+  /**
    * A run as the room will take it: whatever falls on a point already written
    * as a stand-in reads as the stand-in. Late input from somebody who was
    * given up on — a connection that comes back for its place — cannot rewrite

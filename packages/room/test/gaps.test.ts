@@ -49,9 +49,9 @@ function toy(players: number): Sim<Toy> {
 
 const WINDOW = 14
 
-function engine(players: number, local: number[]) {
+function engine(players: number, local: number[], patienceMs = 1e9) {
   return new Rollback<Toy>({
-    patienceMs: 1e9,
+    patienceMs,
     sim: toy(players),
     players,
     localPlayers: local,
@@ -273,5 +273,72 @@ describe('a place somebody took late and left', () => {
     }
     expect(fills.length).toBeGreaterThan(0)
     expect(fills[0]!.from).toBe(seated.at)
+  })
+})
+
+describe('somebody too late', () => {
+  const START = 100_000
+  const LATE = 15
+
+  /** Both heard to point 99, player 1's last word a five. */
+  function playing(): Match {
+    const m = new Match({ players: 4, clock: rollbackClock({ window: WINDOW, slack: 4 }), silenceMs: 4000 })
+    m.begin({ roster: 2, playing: [0, 1], now: START })
+    for (let t = 0; t <= 99; t++) {
+      m.contribute(0, t, [1], START)
+      m.contribute(1, t, [t === 99 ? 5 : 1], START)
+    }
+    return m
+  }
+
+  it('is written what everybody guessed for them, up to the lateness allowed, and keeps their place', () => {
+    const m = playing()
+    for (let t = 100; t <= 140; t++) m.contribute(0, t, [1], START)
+    const fills = m.takeLateFills([0, 1], LATE)
+    expect(fills).toEqual([{ player: 1, from: 100, run: new Array<number>(140 - LATE - 99).fill(5) }])
+    // Their own input for those points reads as what was written; past it, it is theirs.
+    expect(m.settle(1, 124, [9, 9, 9])).toEqual([5, 5, 9])
+    // Nobody handed their place to the computer.
+    expect(m.observe([0, 1], START)).toEqual([])
+  })
+
+  it('is nothing while they are within it', () => {
+    const m = playing()
+    for (let t = 100; t <= 99 + LATE; t++) m.contribute(0, t, [1], START)
+    expect(m.takeLateFills([0, 1], LATE)).toEqual([])
+  })
+
+  it('is nothing for a place nobody holds', () => {
+    const m = playing()
+    for (let t = 100; t <= 140; t++) m.contribute(0, t, [1], START)
+    expect(m.takeLateFills([0], LATE)).toEqual([])
+  })
+
+  it('leaves everybody else’s game as it was, and puts the late one right', () => {
+    // A plays player 0 and B player 1. B's input for 100 to 140 never reaches
+    // the room in time; the room writes what A guessed.
+    // Nobody waits on anybody, as a game that catches up does.
+    const a = engine(2, [0], 0)
+    const b = engine(2, [1], 0)
+    for (let t = 0; t < 141; t++) {
+      a.setLocalInput(0, t, 1)
+      b.setLocalInput(1, t, t < 100 ? (t === 99 ? 5 : 1) : 9)
+      if (t < 100) {
+        a.applyRemote(1, t, [t === 99 ? 5 : 1])
+      }
+      b.applyRemote(0, t, [1])
+      a.advance(16, () => {})
+      b.advance(16, () => {})
+    }
+    const stand = new Array<number>(140 - LATE - 99).fill(5)
+    const before = a.rollbacks
+    a.applyRemote(1, 100, stand)
+    expect(a.rollbacks).toBe(before)
+    expect(a.at).toBe(141)
+    b.applyRemote(1, 100, stand)
+    // B's own input past the stand-in, which reaches A in time.
+    const after = new Array<number>(140 - (140 - LATE)).fill(9)
+    a.applyRemote(1, 141 - LATE, after)
+    expect(b.state.sum).toBe(a.state.sum)
   })
 })

@@ -165,6 +165,12 @@ export interface RoomOptions<Who, Settings, Seat> {
   readonly clock: Clock
   /** How long somebody may say nothing before they are called quiet. */
   readonly silenceMs: number
+  /**
+   * How many points behind the newest anybody has spoken for a person's input
+   * may be before the room writes stand-ins for them: see `Match.takeLateFills`.
+   * Left out, nobody's input is ever too late.
+   */
+  readonly latePoints?: number
   /** How long a log may get before the match cuts it back. Never, if left out. */
   readonly keep?: number
   /** How many disagreement points to remember. */
@@ -874,9 +880,10 @@ export class Room<Who, Settings, Seat> {
     return keep > 0 ? this.match.settle(player, from, run.slice(0, keep)) : null
   }
 
-  /** Whatever stand-ins for somebody gone are now due, as a decision. See `Fill`. */
+  /** Whatever stand-ins for somebody gone, or too late, are now due, as a decision. See `Fill`. */
   private fills(): Decision<Who, Settings, Seat>[] {
     const fills = this.match.takeFills()
+    if (this.opts.latePoints !== undefined) fills.push(...this.match.takeLateFills(this.holders(), this.opts.latePoints))
     return fills.length > 0 ? [{ kind: 'filled', fills }] : []
   }
 
