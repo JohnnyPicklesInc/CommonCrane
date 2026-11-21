@@ -539,20 +539,22 @@ export class Match {
   }
 
   /**
-   * Stand-ins for the people holding a place whose input is more than `late`
-   * points behind the newest anybody has spoken for: from their last word to
-   * `late` short of the newest, at what they last said, which is what every
-   * peer has been guessing for them. Written into the log and final: input of
-   * theirs for those points that arrives later reads as the stand-in (see
-   * `settle`). The place stays theirs. Nothing for a place the computer is
-   * driving, or for somebody who has not spoken since it was given to them.
+   * Stand-ins for the people holding a place whose input is more than
+   * `late.points` behind the newest anybody has spoken for, and who have not
+   * been heard from for `late.ms`: from their last word to `late.points` short
+   * of the newest, at what they last said, which is what every peer has been
+   * guessing for them. Written into the log and final: input of theirs for
+   * those points that arrives later reads as the stand-in (see `settle`). The
+   * place stays theirs. Nothing for a place the computer is driving, or for
+   * somebody who has not spoken since it was given to them.
    */
-  takeLateFills(held: Iterable<number>, late: number): Fill[] {
+  takeLateFills(held: Iterable<number>, late: { points: number; ms: number }, now: number): Fill[] {
     if (!this.running || !this.oriented) return []
     const out: Fill[] = []
-    const upto = this.contributions.head - late
+    const upto = this.contributions.head - late.points
     for (const player of held) {
       if (player < 0 || player >= this.roster || this.automatic[player]) continue
+      if (now - this.presence.heardAt(player) < late.ms) continue
       const last = this.contributions.lastFrom(player)
       if (upto <= last || last < this.givenAt(player)) continue
       const from = last + 1

@@ -85,6 +85,21 @@ describe('compaction', () => {
     expect(log.rectangle(0)[0]).toEqual([3, 4, 5])
   })
 
+  it('keeps the part of a run after the origin, from a run that began before it', () => {
+    // Every message carries the last couple of dozen points, so for a while
+    // after a cut every run begins before the origin.
+    const log = new ContributionLog<number>({ players: 1 })
+    log.record(0, 0, [1, 2, 3, 4])
+    log.compact(3)
+    expect(log.record(0, 1, [2, 3, 4, 5, 6])).toBe(true)
+    expect(log.rectangle(0)[0]).toEqual([4, 5, 6])
+    expect(log.lastFrom(0)).toBe(5)
+    expect(log.head).toBe(5)
+    // Wholly before it: nothing to keep, and not malformed.
+    expect(log.record(0, 0, [1, 2])).toBe(true)
+    expect(log.rectangle(0)[0]).toEqual([4, 5, 6])
+  })
+
 it('starts from the beginning again after a compacted match is cleared', () => {
   // Not from wherever the last game was cut back to. The failure is silent:
   // the next match reports a log starting at a point nobody has played, with

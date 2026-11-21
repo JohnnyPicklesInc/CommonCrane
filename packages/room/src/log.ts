@@ -83,15 +83,19 @@ export class ContributionLog<C = number> {
    * so a lost packet heals itself — so re-recording what is already held is
    * the ordinary case and must be free of consequence.
    *
-   * Returns false for a player outside the roster or a point before the
-   * origin, so a caller can tell a malformed message from a redundant one.
+   * The part of a run before the origin is dropped and the rest recorded: a
+   * run that began before the log was cut back still says what came after.
+   *
+   * Returns false for a player outside the roster or a negative point, so a
+   * caller can tell a malformed message from a redundant one.
    */
   record(player: number, from: At, run: readonly C[]): boolean {
     if (!Number.isInteger(player) || player < 0 || player >= this.players) return false
-    if (!Number.isInteger(from) || from < this.origin) return false
+    if (!Number.isInteger(from) || from < 0) return false
     const row = this.rows[player]!
-    for (let i = 0; i < run.length; i++) row[from + i - this.origin] = run[i]
+    for (let i = Math.max(0, this.origin - from); i < run.length; i++) row[from + i - this.origin] = run[i]
     const end = from + run.length - 1
+    if (end < this.origin) return true
     if (end > this.newest) this.newest = end
     if (end > this.last[player]!) this.last[player] = end
     return true

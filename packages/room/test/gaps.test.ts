@@ -279,6 +279,8 @@ describe('a place somebody took late and left', () => {
 describe('somebody too late', () => {
   const START = 100_000
   const LATE = 15
+  const LATE_MS = 250
+  const late = { points: LATE, ms: LATE_MS }
 
   /** Both heard to point 99, player 1's last word a five. */
   function playing(): Match {
@@ -294,7 +296,7 @@ describe('somebody too late', () => {
   it('is written what everybody guessed for them, up to the lateness allowed, and keeps their place', () => {
     const m = playing()
     for (let t = 100; t <= 140; t++) m.contribute(0, t, [1], START)
-    const fills = m.takeLateFills([0, 1], LATE)
+    const fills = m.takeLateFills([0, 1], late, START + LATE_MS)
     expect(fills).toEqual([{ player: 1, from: 100, run: new Array<number>(140 - LATE - 99).fill(5) }])
     // Their own input for those points reads as what was written; past it, it is theirs.
     expect(m.settle(1, 124, [9, 9, 9])).toEqual([5, 5, 9])
@@ -305,13 +307,20 @@ describe('somebody too late', () => {
   it('is nothing while they are within it', () => {
     const m = playing()
     for (let t = 100; t <= 99 + LATE; t++) m.contribute(0, t, [1], START)
-    expect(m.takeLateFills([0, 1], LATE)).toEqual([])
+    expect(m.takeLateFills([0, 1], late, START + LATE_MS)).toEqual([])
+  })
+
+  it('is nothing for somebody heard from just now, however far behind their input', () => {
+    // Everybody played a burst in one frame and one message got to the room first.
+    const m = playing()
+    for (let t = 100; t <= 140; t++) m.contribute(0, t, [1], START)
+    expect(m.takeLateFills([0, 1], late, START + LATE_MS - 1)).toEqual([])
   })
 
   it('is nothing for a place nobody holds', () => {
     const m = playing()
     for (let t = 100; t <= 140; t++) m.contribute(0, t, [1], START)
-    expect(m.takeLateFills([0], LATE)).toEqual([])
+    expect(m.takeLateFills([0], late, START + LATE_MS)).toEqual([])
   })
 
   it('leaves everybody else’s game as it was, and puts the late one right', () => {

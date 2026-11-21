@@ -56,6 +56,11 @@ export class Presence {
     this.heard[player] = now
   }
 
+  /** When a player was last heard from. */
+  heardAt(player: number): number {
+    return this.heard[player] ?? 0
+  }
+
   /** Start the clock for a player without pretending they have spoken yet. */
   reset(player: number, now: number): void {
     if (player < 0 || player >= this.opts.players) return

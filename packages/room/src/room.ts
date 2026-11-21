@@ -166,11 +166,12 @@ export interface RoomOptions<Who, Settings, Seat> {
   /** How long somebody may say nothing before they are called quiet. */
   readonly silenceMs: number
   /**
-   * How many points behind the newest anybody has spoken for a person's input
-   * may be before the room writes stand-ins for them: see `Match.takeLateFills`.
-   * Left out, nobody's input is ever too late.
+   * How late a person's input may be before the room writes stand-ins for
+   * them: more than `points` behind the newest anybody has spoken for, and
+   * nothing heard from them for `ms`. See `Match.takeLateFills`. Left out,
+   * nobody's input is ever too late.
    */
-  readonly latePoints?: number
+  readonly late?: { readonly points: number; readonly ms: number }
   /** How long a log may get before the match cuts it back. Never, if left out. */
   readonly keep?: number
   /** How many disagreement points to remember. */
@@ -881,9 +882,9 @@ export class Room<Who, Settings, Seat> {
   }
 
   /** Whatever stand-ins for somebody gone, or too late, are now due, as a decision. See `Fill`. */
-  private fills(): Decision<Who, Settings, Seat>[] {
+  private fills(now: number): Decision<Who, Settings, Seat>[] {
     const fills = this.match.takeFills()
-    if (this.opts.latePoints !== undefined) fills.push(...this.match.takeLateFills(this.holders(), this.opts.latePoints))
+    if (this.opts.late !== undefined) fills.push(...this.match.takeLateFills(this.holders(), this.opts.late, now))
     return fills.length > 0 ? [{ kind: 'filled', fills }] : []
   }
 
@@ -898,7 +899,7 @@ export class Room<Who, Settings, Seat> {
       // really pressed, and nothing more. It is not somebody speaking again,
       // which would hand them back the place they have just left.
       this.match.record(player, from, claimed)
-      return this.fills()
+      return this.fills(now)
     }
     const out: Decision<Who, Settings, Seat>[] = []
     const changes = this.match.contribute(player, from, claimed, now) ?? []
@@ -906,7 +907,7 @@ export class Room<Who, Settings, Seat> {
     const quiet = this.match.observe(this.holders(), now)
     if (quiet.length > 0) out.push({ kind: 'handovers', changes: quiet })
     // The newest point may have moved, and with it what is owed somebody gone.
-    out.push(...this.fills())
+    out.push(...this.fills(now))
     return out
   }
 
@@ -935,7 +936,7 @@ export class Room<Who, Settings, Seat> {
     // Somebody coming back is news, and waiting for the next beat to say so
     // leaves them watching the computer play their place for another second.
     const changes = this.match.observe(this.holders(), now)
-    return [...(changes.length > 0 ? [{ kind: 'handovers', changes } as const] : []), ...this.fills()]
+    return [...(changes.length > 0 ? [{ kind: 'handovers', changes } as const] : []), ...this.fills(now)]
   }
 
   /**
@@ -1015,7 +1016,7 @@ export class Room<Who, Settings, Seat> {
     if (this.running) {
       const quiet = this.match.observe(this.holders(), now)
       if (quiet.length > 0) out.push({ kind: 'handovers', changes: quiet })
-      out.push(...this.fills())
+      out.push(...this.fills(now))
     }
     const listed = this.worthSaying(now)
     if (listed !== null) out.push(listed)
@@ -1198,7 +1199,7 @@ export class Room<Who, Settings, Seat> {
         this.match.seal(p)
       }
       if (changes.length > 0) out.push({ kind: 'handovers', changes })
-      out.push(...this.fills())
+      out.push(...this.fills(now))
     }
     const remaining = this.opts.members().filter((m) => m.who !== who)
     if (remaining.length === 0) {
