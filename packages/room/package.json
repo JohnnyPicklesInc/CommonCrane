@@ -1,6 +1,6 @@
 {
   "name": "@johnnypickles/room",
-  "version": "2.6.5",
+  "version": "2.6.6",
   "license": "MIT",
   "description": "Matchmaking, presence and rollback netcode for small multiplayer games.",
   "keywords": [
