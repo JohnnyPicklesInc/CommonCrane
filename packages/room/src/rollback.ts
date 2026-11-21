@@ -160,7 +160,8 @@ export interface RollbackOptions<State> {
    * and it is the stopped room this exists to prevent.
    *
    * So the fork is accepted and recovered from rather than prevented.
-   * `staleCorrections` counts every dropped correction, which is the signal a
+   * `staleCorrections` counts every dropped correction that differed from what
+   * was played, up to twice the ring back, which is the signal a
    * caller should treat exactly as it treats a disagreeing fingerprint: ask the
    * room for the match back. Measured, an end-to-end run at two seconds against
    * a ring of forty-two points forked about one time in six under a saturated
@@ -198,7 +199,11 @@ export class Rollback<State> {
   private readonly ringAt: number[] = []
   /** What each player really sent, by point. */
   private readonly real: Map<At, number>[] = []
-  /** What we actually stepped with, so a contradiction is detectable. */
+  /**
+   * What we actually stepped with, so a contradiction is detectable. Kept for
+   * twice the ring, so one that arrives too late to put right is still told
+   * from input that only says again what was played.
+   */
   private readonly used: Map<At, number>[] = []
   private readonly lastValue: number[] = []
   private readonly lastReal: At[] = []
@@ -1009,7 +1014,7 @@ export class Rollback<State> {
       for (const k of this.real[p]!.keys()) if (k < keep) this.real[p]!.delete(k)
       const imposed = this.imposed[p]
       if (imposed !== undefined) for (const k of imposed) if (k < ring) imposed.delete(k)
-      for (const k of this.used[p]!.keys()) if (k < ring) this.used[p]!.delete(k)
+      for (const k of this.used[p]!.keys()) if (k < ring - this.ringSize) this.used[p]!.delete(k)
     }
     for (const k of this.hashAt.keys()) if (k < this.nextHash) this.hashAt.delete(k)
   }

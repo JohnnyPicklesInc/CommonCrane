@@ -514,10 +514,23 @@ describe('how far back a rewind reaches', () => {
   /** The total had every point been played with the input on time. */
   const onTime = (r: ReturnType<typeof eager>): number => r.at + 21 + 2 * (r.at - 21)
 
-  it('cannot reach a correction older than the window allows by default', () => {
+  it('cannot reach a correction older than the window allows by default, and counts it', () => {
     const r = eager()
     late(r)
     expect(r.state.sum).not.toBe(onTime(r))
+    expect(r.staleCorrections).toBe(1)
+  })
+
+  it('does not count late input that only says again what was played', () => {
+    const r = eager()
+    for (let t = 0; t < 120; t++) {
+      if (t <= 20) r.applyRemote(1, t, [1])
+      r.setLocalInput(0, t, 1)
+      r.advance(16, () => {})
+    }
+    // The guess was their last input, a one, every point.
+    r.applyRemote(1, 21, new Array<number>(r.at - 21).fill(1))
+    expect(r.staleCorrections).toBe(0)
   })
 
   it('puts it right with the history to reach it', () => {
